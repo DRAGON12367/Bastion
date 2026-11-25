@@ -21,6 +21,9 @@ No program catches everything, and this one has limits you should know:
 Keep Windows updated, keep a real antivirus on, and keep backups.
 
 ## Install
-Run `Bastion-Setup-x.y.z.exe`. The file is not code-signed, so Windows SmartScreen will warn. Compare its SHA-256 with the one published next to it before choosing to run it.
+Download the latest `Bastion-Setup-x.y.z.exe` from the [Releases page](https://github.com/DRAGON12367/Bastion/releases). Until signing is live (see below), SmartScreen may warn — compare the installer's SHA-256 with the one published next to it before running.
 
 **[VirusTotal scan of v1.0.0](https://www.virustotal.com/gui/file/8e27244b60c6e50984f0615e1ba06ae623418aa486f37b80517ede8acd3f234e)** — 3 of ~70 engines flag it with generic/heuristic detections, which is normal for an unsigned installer built with PyInstaller. See SECURITY.md.
+
+## Code signing
+Bastion participates in the free open-source code-signing program of the [SignPath Foundation](https://signpath.org/). Free code signing provided by SignPath.io, certificate by SignPath Foundation. Signing is being rolled out; releases made before it is live are unsigned and carry a published SHA-256 and VirusTotal link instead.
