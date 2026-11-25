@@ -22,3 +22,5 @@ Keep Windows updated, keep a real antivirus on, and keep backups.
 
 ## Install
 Run `Bastion-Setup-x.y.z.exe`. The file is not code-signed, so Windows SmartScreen will warn. Compare its SHA-256 with the one published next to it before choosing to run it.
+
+**[VirusTotal scan of v1.0.0](https://www.virustotal.com/gui/file/8e27244b60c6e50984f0615e1ba06ae623418aa486f37b80517ede8acd3f234e)** — 3 of ~70 engines flag it with generic/heuristic detections, which is normal for an unsigned installer built with PyInstaller. See SECURITY.md.

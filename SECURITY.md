@@ -10,7 +10,9 @@ Get-FileHash Bastion-Setup-1.0.0.exe
 ```
 
 ## VirusTotal
-Each release is scanned by [VirusTotal](https://www.virustotal.com) and the scan links are posted in the release notes, so you can see what ~70 antivirus engines make of the exact file we published.
+Each release is scanned by [VirusTotal](https://www.virustotal.com) so you can see what ~70 antivirus engines make of the exact file we published.
+
+**v1.0.0:** [https://www.virustotal.com/gui/file/8e27244b60c6e50984f0615e1ba06ae623418aa486f37b80517ede8acd3f234e](https://www.virustotal.com/gui/file/8e27244b60c6e50984f0615e1ba06ae623418aa486f37b80517ede8acd3f234e) — 3 of ~70 engines flag it.
 
 **Expect a few detections, and here is why.** Bastion is built with PyInstaller, which bundles a Python runtime. Many unsigned PyInstaller apps trigger 2–10 "generic/heuristic" flags from smaller engines. We are working on code signing (via the SignPath Foundation, free for open-source) to reduce this. If a major engine (Microsoft, Kaspersky, BitDefender, ESET) flags a release, treat that as serious and open an issue.
 
