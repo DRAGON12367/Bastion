@@ -14,6 +14,12 @@ Each release is scanned by [VirusTotal](https://www.virustotal.com) so you can s
 
 **v1.0.0:** [https://www.virustotal.com/gui/file/8e27244b60c6e50984f0615e1ba06ae623418aa486f37b80517ede8acd3f234e](https://www.virustotal.com/gui/file/8e27244b60c6e50984f0615e1ba06ae623418aa486f37b80517ede8acd3f234e) — 3 of ~70 engines flag it.
 
+All three are machine-learning / heuristic guesses, not matches to any known malware:
+- **Kaspersky** `HEUR:Trojan.Python.Disin.a` — a generic label Kaspersky applies to PyInstaller-packed Python; a known false positive for Python apps.
+- **DeepInstinct** `MALICIOUS` and **Trapmine** `Suspicious.low.ml.score` — enterprise ML engines scoring the file's shape.
+
+We are reducing these through code signing and false-positive reports.
+
 **Expect a few detections, and here is why.** Bastion is built with PyInstaller, which bundles a Python runtime. Many unsigned PyInstaller apps trigger 2–10 "generic/heuristic" flags from smaller engines. We are working on code signing (via the SignPath Foundation, free for open-source) to reduce this. If a major engine (Microsoft, Kaspersky, BitDefender, ESET) flags a release, treat that as serious and open an issue.
 
 ## Privacy
