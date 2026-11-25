@@ -7,6 +7,7 @@ A free guard for Windows 10 and 11 PCs (64-bit). It works **beside** your antivi
 - **Scans the whole computer** on many threads with its own engine: known-malware lists, public YARA signatures, and its own checks of programs, scripts, documents, archives, shortcuts, disc images, web pages, hidden file streams, memory, drivers, scheduled tasks and browser add-ons.
 - **Hardening page:** switches on Windows and Defender protections that are off by default. Undo puts back what you had.
 - **Optional AI:** if you run [Ollama](https://ollama.com), a model on your own PC explains alerts. It can raise an alert but can never trust, release or delete anything.
+- **No account, no ads, no tracking:** nothing about you leaves your PC. An optional anonymous usage ping (off by default) sends only a random id and version, never your IP.
 
 ## What it does not do
 No program catches everything, and this one has limits you should know:

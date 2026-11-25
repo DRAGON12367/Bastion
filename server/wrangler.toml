@@ -1,0 +1,11 @@
+name = "bastion-usage"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Created with:  wrangler kv namespace create USAGE
+# Paste the id it prints here, then run:  wrangler deploy
+[[kv_namespaces]]
+binding = "USAGE"
+id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+
+# ADMIN_TOKEN is NOT kept here. Set it privately:  wrangler secret put ADMIN_TOKEN
