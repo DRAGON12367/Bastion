@@ -11,6 +11,9 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.pm.Signature;
+import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.net.Network;
 import android.os.Build;
 import android.provider.Settings;
 
@@ -34,6 +37,8 @@ import java.util.Set;
 public final class Scanner {
     static final String LIST_URL = "https://raw.githubusercontent.com/AssoEchap/stalkerware-indicators/master/ioc.yaml";
     static final long LIST_MAX_AGE = 3L * 86_400_000L;
+    static final Set<String> BLOCKING_DNS = new HashSet<>(Arrays.asList("dns.quad9.net", "dns9.quad9.net", "dns11.quad9.net",
+            "security.cloudflare-dns.com", "family.cloudflare-dns.com", "dns.adguard-dns.com", "family.adguard-dns.com", "family-filter-dns.cleanbrowsing.org", "security-filter-dns.cleanbrowsing.org"));
     static final Set<String> STORES = new HashSet<>(Arrays.asList(
             "com.android.vending", "com.amazon.venezia", "com.sec.android.app.samsungapps", "com.huawei.appmarket",
             "org.fdroid.fdroid", "org.fdroid.basic", "com.aurora.store", "com.xiaomi.market", "com.xiaomi.mipicks",
@@ -101,6 +106,24 @@ public final class Scanner {
         boolean adb = Settings.Global.getInt(ctx.getContentResolver(), Settings.Global.ADB_ENABLED, 0) == 1;
         r.checks.add(new Check("USB debugging", adb ? "USB debugging is on. A computer you plug into could control this phone. Turn it off unless you need it." : "Off.",
                 !adb, Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS));
+
+        // Private DNS: the one switch that blocks dangerous sites for every browser and app on the phone.
+        String dns = null;
+        boolean dnsOn = false;
+        try {
+            ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+            Network n = cm == null ? null : cm.getActiveNetwork();
+            LinkProperties lp = n == null ? null : cm.getLinkProperties(n);
+            if (lp != null && Build.VERSION.SDK_INT >= 28) {
+                dnsOn = lp.isPrivateDnsActive();
+                dns = lp.getPrivateDnsServerName();
+            }
+        } catch (Exception ignored) { }
+        boolean blocking = dns != null && BLOCKING_DNS.contains(dns.toLowerCase(Locale.ROOT));
+        r.checks.add(new Check("Dangerous-site blocking", blocking ? "On: this phone looks sites up through " + dns + ", which refuses known malware and phishing sites in every app." :
+                (dns != null ? "Private DNS is " + dns + ", which does not block malware sites. " : (dnsOn ? "Private DNS is on automatically but doesn't block anything. " : "Off. ")) +
+                "Turn it on: Settings > Network & internet > Private DNS > Private DNS provider hostname > dns.quad9.net",
+                blocking, "android.settings.WIRELESS_SETTINGS"));
 
         boolean dev = Settings.Global.getInt(ctx.getContentResolver(), Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1;
         r.checks.add(new Check("Developer options", dev ? "Developer options are on. Fine if you use them; otherwise turn them off." : "Off.",

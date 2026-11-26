@@ -16,6 +16,10 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.EditText;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.os.Build;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -34,6 +38,9 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private boolean scanning;
+    private LinearLayout linkResult;
+    private EditText linkBox;
+    private PhishLists phish;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -63,6 +70,20 @@ public class MainActivity extends Activity {
         top.addView(scanButton);
         root.addView(top);
 
+        LinearLayout link = card();
+        link.addView(text("Check a link", 17, TEXT, true));
+        link.addView(text("Paste a link, or share one to Bastion from your browser or messages, before you open it.", 13, DIM, false));
+        linkBox = new EditText(this);
+        linkBox.setHint("https://…");
+        linkBox.setTextColor(TEXT);
+        linkBox.setHintTextColor(DIM);
+        linkBox.setSingleLine(true);
+        link.addView(linkBox);
+        link.addView(button("Check link", false, v -> showLink(String.valueOf(linkBox.getText()))));
+        linkResult = column();
+        link.addView(linkResult);
+        root.addView(link);
+
         list = column();
         root.addView(list);
 
@@ -70,7 +91,41 @@ public class MainActivity extends Activity {
         foot.setPadding(dp(4), dp(18), dp(4), 0);
         root.addView(foot);
         setContentView(scroll);
+        GuardJob.schedule(this);
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
+        new Thread(() -> {
+            PhishLists p = new PhishLists(this);
+            p.refresh(false);
+            ui.post(() -> { phish = p; handleShare(getIntent()); });
+        }, "lists").start();
         scan();
+    }
+
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        handleShare(i);
+    }
+
+    private void handleShare(Intent i) {
+        if (i != null && Intent.ACTION_SEND.equals(i.getAction())) {
+            String shared = i.getStringExtra(Intent.EXTRA_TEXT);
+            if (shared != null) {
+                linkBox.setText(shared);
+                showLink(shared);
+            }
+        }
+    }
+
+    private void showLink(String text) {
+        Links.Result r = Links.check(text, phish);
+        linkResult.removeAllViews();
+        int colour = r.level == Links.DANGER ? BAD : r.level == Links.CAUTION ? WARN : GOOD;
+        linkResult.addView(space(8));
+        linkResult.addView(text(r.headline, 15, colour, true));
+        for (String why : r.reasons) linkResult.addView(text("• " + why, 14, TEXT, false));
+        if (phish == null || phish.size() == 0) linkResult.addView(text("The phishing lists are still downloading, so only warning signs were checked.", 12, DIM, false));
     }
 
     private void scan() {
@@ -119,7 +174,7 @@ public class MainActivity extends Activity {
             headline.setText("Nothing known-bad found");
             headline.setTextColor(GOOD);
         }
-        subline.setText(r.appsLooked + " apps checked. " + (weak == 0 ? "Phone settings look good." : weak + " setting" + (weak == 1 ? "" : "s") + " could be safer.")
+        subline.setText("24/7 checks are on: Bastion re-checks your apps about every 30 minutes and notifies you. " + r.appsLooked + " apps checked. " + (weak == 0 ? "Phone settings look good." : weak + " setting" + (weak == 1 ? "" : "s") + " could be safer.")
                 + "\n" + r.listNote);
 
         if (known > 0) list.addView(advice());
@@ -168,6 +223,12 @@ public class MainActivity extends Activity {
         c.addView(text(k.detail, 14, TEXT, false));
         if (!k.ok) {
             c.addView(space(8));
+            if (k.title.equals("Dangerous-site blocking"))
+                c.addView(button("Copy dns.quad9.net", false, v -> {
+                    ClipboardManager cb = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                    if (cb != null) cb.setPrimaryClip(ClipData.newPlainText("Private DNS", "dns.quad9.net"));
+                    android.widget.Toast.makeText(this, "Copied. Paste it into Private DNS provider hostname.", android.widget.Toast.LENGTH_LONG).show();
+                }));
             c.addView(button("Open settings", false, v -> open(new Intent(k.settingsAction))));
         }
         return c;

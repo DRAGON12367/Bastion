@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QLabel, QLineEdit, QListWidget, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QSystemTrayIcon,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from . import ai, core, engine as E, harden, scanner, telemetry
+from . import ai, core, engine as E, harden, scanner, telemetry, web
 from .core import HIGH, LEVELS, MEDIUM
 
 GOOD, WARN, BAD, DIM = "#4cc38a", "#e0a73c", "#e5534b", "#8b96a5"
@@ -188,7 +188,7 @@ class Window(QMainWindow):
         grid.setSpacing(10)
         for i, (n, what) in enumerate((("Files", "New downloads and files"), ("Programs", "What starts and how"), ("Ransomware", "Bait files and mass changes"),
                                        ("Startup", "New auto-start entries"), ("Network", "Known bad servers"), ("USB drives", "Checked when plugged in"), ("Defender", "Windows' own engine"),
-                                       ("RAT", "Remote control and spying"), ("Rootkit", "Drivers and hidden programs"), ("AI", "Explains and learns"), ("Scanner", "Daily scan and signatures"))):
+                                       ("RAT", "Remote control and spying"), ("Rootkit", "Drivers and hidden programs"), ("AI", "Explains and learns"), ("Scanner", "Daily scan and signatures"), ("Web", "Phishing sites you open"))):
             c = QFrame()
             c.setObjectName("card")
             cv = QVBoxLayout(c)
@@ -233,6 +233,17 @@ class Window(QMainWindow):
         self.bar, self.scan_text = QProgressBar(), label("Nothing scanned yet.", "dim")
         v.addWidget(self.bar)
         v.addWidget(self.scan_text)
+        h = QHBoxLayout()
+        self.link_box = QLineEdit()
+        self.link_box.setPlaceholderText("Paste a link to check it before you open it")
+        self.link_box.returnPressed.connect(self.check_link)
+        h.addWidget(self.link_box, 1)
+        h.addWidget(button("Check link", self.check_link))
+        v.addLayout(h)
+        self.link_text = label("", "dim")
+        self.link_text.setTextFormat(Qt.PlainText)          # the link is someone else's text
+        self.link_text.setWordWrap(True)
+        v.addWidget(self.link_text)
         self.found = table(["Verdict", "File", "Why"], 1)
         v.addWidget(self.found, 1)
         h = QHBoxLayout()
@@ -342,6 +353,11 @@ class Window(QMainWindow):
         h.addWidget(self.h_undo)
         h.addStretch()
         v.addLayout(h)
+        h = QHBoxLayout()
+        h.addWidget(button("Block dangerous websites (Quad9)", self.dns_on))
+        h.addWidget(button("Restore my old DNS", self.dns_off))
+        h.addStretch()
+        v.addLayout(h)
         self.h_text = label("", "dim")
         v.addWidget(self.h_text)
         return w
@@ -359,6 +375,7 @@ class Window(QMainWindow):
         check("Act by itself: quarantine known malware, freeze programs caught acting like ransomware, a RAT or a drive-by", s["auto_respond"], lambda on: s.__setitem__("auto_respond", on))
         check("Download public block lists every 6 hours (abuse.ch, Spamhaus, LOLDrivers, YARA Forge; nothing about this PC is sent)", s["intel_updates"], lambda on: s.__setitem__("intel_updates", on))
         self.auto = check("Run 24/7: start with Windows and restart if it stops", core.autostart_on(), self.set_auto)
+        check("Check sites I open in my browsers against phishing lists (only site names are looked at, on this PC; nothing is sent)", s["watch_browsing"], lambda on: s.__setitem__("watch_browsing", on))
         check("Send an anonymous usage ping (off by default) — a random id and the version only, no IP or personal data, so the author can count how many people use Bastion", s["usage_ping"], lambda on: s.__setitem__("usage_ping", on))
         h = QHBoxLayout()
         h.addWidget(QLabel("Pop up for"))
@@ -500,6 +517,11 @@ class Window(QMainWindow):
                 self.ctx.scan_lock.release()
         self.work("scan", job)
 
+    def check_link(self):
+        level, head, reasons = web.check_link(self.link_box.text(), self.ctx.intel.bad_site)
+        self.link_text.setStyleSheet(f"color: {(GOOD, WARN, BAD)[level]}")
+        self.link_text.setText(head + ("\n" + "\n".join("- " + r for r in reasons) if reasons else ""))
+
     def on_scan(self, s):
         if not s.walking:
             done = s.checked + s.unchanged
@@ -600,6 +622,17 @@ class Window(QMainWindow):
             self.h_text.setText("Waiting for Windows")
             self.work("harden", lambda: harden.run_elevated(harden.apply_script()))
 
+    def dns_on(self):
+        if self.ask("Block dangerous websites for every browser and app on this PC?\n\n"
+                    "Your wired and Wi-Fi connections will look up sites through Quad9, a Swiss non-profit service that refuses known malware and phishing sites and does not log your IP address. "
+                    "A VPN keeps its own settings. Your old settings are saved, and 'Restore my old DNS' puts them back.\n\nWindows will ask for administrator approval."):
+            self.h_text.setText("Waiting for Windows")
+            self.work("harden", lambda: harden.run_elevated(harden.dns_block_script()))
+
+    def dns_off(self):
+        if self.ask("Put back the DNS settings this PC had before?"):
+            self.work("harden", lambda: harden.run_elevated(harden.dns_restore_script()))
+
     def harden_undo(self):
         if self.ask("Put Defender's settings back as they were before?"):
             self.work("harden", lambda: harden.run_elevated(harden.undo_script()))
@@ -617,6 +650,7 @@ class Window(QMainWindow):
                  "- It watches new files, programs, start-up entries, drivers and connections on this PC.\n"
                  "- It keeps a few hidden bait files in Documents, Pictures and Downloads to notice ransomware. Please leave them there.\n"
                  "- It downloads public block lists. It sends nothing about you or this PC anywhere.\n"
+                 "- It checks the sites you open in your browsers against phishing lists, on this PC only. You can switch this off in Settings.\n"
                  "- It quarantines only files known to be malware, and only freezes programs caught misbehaving. Both can be undone, and both can be switched off in Settings.\n\n"
                  "No program catches everything. Keep Windows updated and keep backups.")
         if telemetry.PING_URL:

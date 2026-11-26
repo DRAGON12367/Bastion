@@ -10,7 +10,7 @@ import time
 import winreg
 from pathlib import Path
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 NO_WINDOW = 0x08000000
 FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = Path(sys.executable).parent if FROZEN else Path(__file__).resolve().parent.parent
@@ -28,6 +28,7 @@ DEFAULTS = {
     "ai_model": "",            # empty: pick one that is installed
     "notify_level": HIGH,
     "welcomed": False,         # the first-run explanation was shown
+    "watch_browsing": True,    # check sites opened in this PC's browsers against phishing lists, on this PC only
     "usage_ping": False,       # OFF unless the owner turns it on: send an anonymous random id + version to the author's counter
     "install_id": "",          # a random id made on this PC; only ever sent if usage_ping is on
     "stopped_by_user": False,  # Exit was chosen: the keep-alive task must not bring it back

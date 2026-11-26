@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.1.0
+Web protection on PC and phone, and 24/7 checks on Android.
+
+### Windows
+- **Phishing-site alerts:** checks each site newly opened in Edge, Chrome, Brave, Vivaldi, Opera or Firefox against ~400,000 known phishing sites (Phishing.Database) and live phishing pages (OpenPhish), and warns you if you open one. Only site names are looked at, on your PC; nothing is sent. Can be switched off in Settings.
+- **Block dangerous websites (Quad9):** one button on the Hardening page points your wired and Wi-Fi connections at Quad9, which refuses known malware and phishing sites for every browser and app. VPNs keep their own settings; your old DNS is saved and can be restored.
+- **Check a link:** paste any link on the Scan page to see if it's a known phishing site or uses common tricks (fake brand names, look-alike letters, shortened or bare-number links).
+
+### Android 1.1.0
+- **24/7 checks:** re-checks your apps about every 30 minutes and after a restart, and notifies you when a new app looks like spyware or an app has just been given control of your screen or device-admin rights.
+- **Check a link:** paste a link, or share it to Bastion from your browser or messages.
+- **Dangerous-site blocking check:** tells you whether Private DNS blocks malware sites, and helps you turn on Quad9 in two taps.
+- Phishing lists are kept on the phone (about 3 MB); the large list only downloads on Wi-Fi.
+
 ## v1.0.1
 Focus of this release: **far fewer false alarms**, more detection, and getting ready for code signing.
 

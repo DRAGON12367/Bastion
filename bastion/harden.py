@@ -13,6 +13,8 @@ from .core import DATA, quoted
 BACKUP = DATA / "defender_before.json"
 RESULT = DATA / "harden_result.txt"
 REG_BACKUP = DATA / "windows_before.json"
+DNS_BACKUP = DATA / "dns_before.json"
+QUAD9 = ["9.9.9.9", "149.112.112.112", "2620:fe::fe", "2620:fe::9"]
 
 # Microsoft's attack-surface-reduction rules. Left out on purpose: "block programs that are rare or new", which would stop your own games and tools.
 BLOCK = {
@@ -143,6 +145,44 @@ def undo_script():
     return _steps(steps + [f"Remove-Item {quoted(BACKUP)}"])
 
 
+def quad9_on():
+    """True when a network connection on this PC uses Quad9."""
+    base = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base) as k:
+            for i in range(winreg.QueryInfoKey(k)[0]):
+                if "9.9.9.9" in str(reg_read(base + "\\" + winreg.EnumKey(k, i), "NameServer") or ""):
+                    return True
+    except OSError:
+        pass
+    return False
+
+
+def dns_block_script():
+    """Points the PC's wired and Wi-Fi connections at Quad9, which refuses to look up known malware and phishing sites, for every browser
+    and app. What was there before is saved first. VPN adapters are left alone, so a VPN keeps its own DNS."""
+    nics = "Get-NetAdapter -Physical | Where-Object { $_.Status -eq 'Up' }"
+    return _steps([
+        f"if (-not (Test-Path {quoted(DNS_BACKUP)})) {{ $b=@{{}}; foreach ($n in {nics}) {{ $b[[string]$n.ifIndex]=@((Get-DnsClientServerAddress -InterfaceIndex $n.ifIndex).ServerAddresses) }}; $b | ConvertTo-Json | Set-Content -Encoding utf8 {quoted(DNS_BACKUP)} }}",
+        f"foreach ($n in {nics}) {{ Set-DnsClientServerAddress -InterfaceIndex $n.ifIndex -ServerAddresses {','.join(repr(a) for a in QUAD9)} }}",
+        "foreach ($a in '9.9.9.9','149.112.112.112') { if (Get-Command Add-DnsClientDohServerAddress -ErrorAction SilentlyContinue) { "
+        "try { Add-DnsClientDohServerAddress -ServerAddress $a -DohTemplate 'https://dns.quad9.net/dns-query' -AllowFallbackToUdp $true -AutoUpgrade $true -ErrorAction Stop } "
+        "catch { Set-DnsClientDohServerAddress -ServerAddress $a -DohTemplate 'https://dns.quad9.net/dns-query' -AllowFallbackToUdp $true -AutoUpgrade $true } } }",
+        "Clear-DnsClientCache",
+    ])
+
+
+def dns_restore_script():
+    """Puts back the DNS each connection had. Only addresses that really are IP addresses are restored, whatever the saved file says."""
+    return _steps([
+        f"if (Test-Path {quoted(DNS_BACKUP)}) {{ $b = Get-Content -Raw {quoted(DNS_BACKUP)} | ConvertFrom-Json; "
+        "foreach ($p in $b.PSObject.Properties) { $i=[int]$p.Name; $ips=@($p.Value | Where-Object { $x=$null; [Net.IPAddress]::TryParse([string]$_, [ref]$x) }); "
+        "if ($ips.Count) { Set-DnsClientServerAddress -InterfaceIndex $i -ServerAddresses $ips } else { Set-DnsClientServerAddress -InterfaceIndex $i -ResetServerAddresses } } "
+        f"Remove-Item {quoted(DNS_BACKUP)} }} else {{ Get-NetAdapter -Physical | ForEach-Object {{ Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ResetServerAddresses }} }}",
+        "Clear-DnsClientCache",
+    ])
+
+
 def run_elevated(script, timeout=180):
     """Windows shows its administrator prompt. The script goes by file, and the raised part refuses it if a single byte was swapped. Returns (ok, message)."""
     RESULT.unlink(missing_ok=True)
@@ -182,6 +222,7 @@ def status(d):
         ("Protected folders", d["cfa"] in (1, 2), {0: "Off", 1: "Blocking", 2: "Logging only, so your games and builds keep working"}.get(d["cfa"], "Custom")),
         *[(layer, all(reg_read(k, n) == v for l, k, n, v in REG if l == layer), note) for layer, note in REG_NOTES.items()],
         ("Windows tools cut off from the web", firewall_on(), ", ".join(NO_NET)),
+        ("Dangerous-site blocking (Quad9)", quad9_on(), "Blocks known malware and phishing sites in every browser and app. Use the button below"),
         ("Secure Boot", reg_read(r"SYSTEM\CurrentControlSet\Control\SecureBoot\State", "UEFISecureBootEnabled") == 1, "Stops rootkits that load before Windows"),
         ("Memory integrity", bool(d.get("hvci")), "Stops rootkits inside Windows. By hand: turn on virtualization (SVM or VT-x) in the BIOS, then Windows Security > Core isolation"),
     ]

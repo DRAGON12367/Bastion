@@ -19,7 +19,7 @@ import psutil
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import ai, engine as E, scanner, telemetry
+from . import ai, engine as E, scanner, telemetry, web
 from .core import CRITICAL, DATA, HIGH, INFO, LOW, MEDIUM, folders, memory_short, playing, powershell, run
 
 WINDIR = os.environ.get("SystemRoot", r"C:\Windows").lower()
@@ -1008,6 +1008,30 @@ class ScanGuard(Guard):
                 self.ctx.log.add(HIGH if r.verdict >= E.DANGEROUS else MEDIUM, self.label, f"{E.VERDICTS[r.verdict]} file found by the daily scan", f"{r.path}\n{'; '.join(r.reasons)}", r.path)
 
 
+class WebGuard(Guard):
+    """Checks each site newly opened in this PC's browsers against the phishing lists. Only site names are looked at, only on this PC,
+    and nothing is kept but the time of the last visit checked."""
+    label, every = "Web", 30.0
+
+    def setup(self):
+        self.state, self.told = {}, set()
+
+    def status(self):
+        return "on" if self.ctx.settings["watch_browsing"] else "switched off"
+
+    def step(self):
+        if not self.ctx.settings["watch_browsing"]:
+            return
+        for browser, host in web.new_visits(self.state):
+            if host in self.told or self.ctx.settings.allowed(host):
+                continue
+            why = next((w for w in map(self.ctx.intel.bad_site, web.candidates(host)) if w), None)
+            if why:
+                self.told.add(host)
+                self.ctx.log.add(HIGH, self.label, f"A known phishing site was opened in {browser}",
+                                 f"{host}\nIt is on the {why}.\nClose that page. If you typed a password or card number there, change it now from a safe device.", host)
+
+
 class AIGuard(Guard):
     """Feeds alerts to the local model, one at a time, when the PC has room for it."""
     label, every = "AI", 5.0
@@ -1056,7 +1080,7 @@ class Context:
         self.held = {}       # pid -> (psutil.Process, why)
 
     def start(self):
-        self.guards = [self.ransom, FileGuard(self), ProcessGuard(self), StartupGuard(self), NetworkGuard(self), DriveGuard(self), DefenderGuard(self), RatGuard(self), RootkitGuard(self), AIGuard(self), ScanGuard(self)]
+        self.guards = [self.ransom, FileGuard(self), ProcessGuard(self), StartupGuard(self), NetworkGuard(self), DriveGuard(self), DefenderGuard(self), RatGuard(self), RootkitGuard(self), AIGuard(self), ScanGuard(self), WebGuard(self)]
         self.log.listeners.append(self.ai.offer)
         for g in self.guards:
             g.start()

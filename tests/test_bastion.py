@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import psutil
 import pytest
 
-from bastion import core, engine as E, guards as G, harden, scanner as S, telemetry
+from bastion import core, engine as E, guards as G, harden, scanner as S, telemetry, web
 
 
 @pytest.fixture
@@ -753,6 +753,90 @@ def test_network_failure_is_swallowed(ctx, monkeypatch):
     p = telemetry.Pinger(ctx)
     p.last = -1e9
     p.tick()                            # must not raise
+
+
+def test_link_checker_has_no_false_alarms_on_real_sites():
+    honest = ["https://www.google.com/search?q=x", "https://accounts.google.com/signin", "https://login.microsoftonline.com/common", "https://www.paypal.com/signin",
+              "https://appleid.apple.com", "https://www.roblox.com/games/1", "https://store.steampowered.com", "https://pineapple.com", "https://www.purchase.com",
+              "https://groups.google.com/g/x", "https://steamboat.com", "https://discord.com/app", "https://www.amazon.ca/dp/1", "https://github.com/DRAGON12367/Bastion",
+              "https://www.rbcroyalbank.com", "https://www.canadapost-postescanada.ca/track", "en.wikipedia.org/wiki/Phishing"]
+    for u in honest:
+        assert web.check_link(u, lambda h: None)[0] == web.SAFE, u
+
+
+def test_link_checker_catches_tricks():
+    for u in ("https://paypal.com.secure-login.xyz/signin", "https://apple-id-verify.help", "http://192.0.2.7/login", "https://xn--pple-43d.com",
+              "bit.ly/3abc", "https://steam-community.gift/trade", "https://microsoft-account-verify.online", "hxxps://roblox.free-robux.click"):
+        assert web.check_link(u, lambda h: None)[0] == web.CAUTION, u
+    assert web.check_link("https://evil.example.com/x", lambda h: "test list" if h == "evil.example.com" else None)[0] == web.DANGER
+    assert web.check_link("just some words", lambda h: None)[0] == web.CAUTION
+
+
+def test_site_lists_are_compact_and_exact(tmp_path):
+    hosts = [f"site{i}.phish.example" for i in range(50000)]
+    s = web.SiteList(hosts)
+    assert len(s) == 50000 and "site123.phish.example" in s and "phish.example" not in s and "google.com" not in s
+    assert s._a.itemsize * len(s._a) < 500_000       # 8 bytes a site
+    i = E.Intel(tmp_path / "i")
+    (i.dir / "phishing.txt").write_text("# list\nbad-login.example\nwww.paypa1-verify.example\n")
+    (i.dir / "openphish.txt").write_text("https://live.phish.example/login.php\n")
+    i.load()
+    assert i.bad_site("bad-login.example") and i.bad_site("live.phish.example") and not i.bad_site("example") and not i.bad_site("google.com")
+    assert i.bad_site("www.paypa1-verify.example") and not i.bad_site("paypa1-verify.example")      # exact names only
+
+
+def test_big_list_is_fetched_daily_not_every_six_hours(tmp_path, monkeypatch):
+    i = E.Intel(tmp_path / "i")
+    (i.dir / "phishing.txt").write_text("old.example\n")
+    got = []
+    monkeypatch.setattr(E, "fetch", lambda url, limit: got.append(url) or b"# x\nnew.example\n")
+    i.update()
+    assert not any("Phishing.Database" in u for u in got) and any("openphish" in u for u in got)
+
+
+def test_web_guard_warns_once_and_respects_settings(ctx, monkeypatch):
+    (ctx.intel.dir / "phishing.txt").write_text("evil-login.example\n")
+    ctx.intel.load()
+    visits = [("Edge", "www.google.com"), ("Edge", "evil-login.example"), ("Chrome", "evil-login.example")]
+    monkeypatch.setattr(web, "new_visits", lambda state: list(visits))
+    g = G.WebGuard(ctx)
+    g.setup()
+    g.step()
+    hits = [e for e in ctx.log.latest(20, core.HIGH) if e[3] == "Web"]
+    assert len(hits) == 1 and "phishing" in hits[0][4] and "evil-login.example" in hits[0][5]
+    g.step()
+    assert len([e for e in ctx.log.latest(20, core.HIGH) if e[3] == "Web"]) == 1      # once per site
+    ctx.settings["watch_browsing"] = False
+    monkeypatch.setattr(web, "new_visits", lambda state: (_ for _ in ()).throw(AssertionError("must not read history")))
+    g.step()
+    assert g.status() == "switched off"
+
+
+def test_history_reader_reads_only_new_visits(tmp_path, monkeypatch):
+    import sqlite3
+    f = tmp_path / "History"
+    db = sqlite3.connect(f)
+    db.executescript("create table urls(id integer primary key, url text); create table visits(id integer primary key, url integer, visit_time integer);")
+    now = time.time()
+    t = lambda s: int((s + web.EPOCH_1601) * 1e6)
+    db.executemany("insert into urls values(?,?)", [(1, "https://old.example/"), (2, "https://new.example/a"), (3, "file:///C:/secret.txt")])
+    db.executemany("insert into visits(url, visit_time) values(?,?)", [(1, t(now - 7200)), (2, t(now - 30)), (3, t(now - 20))])
+    db.commit(); db.close()
+    monkeypatch.setattr(web, "histories", lambda: [("Edge", "chromium", str(f))])
+    state = {}
+    assert web.new_visits(state) == [("Edge", "new.example")]          # nothing older than 10 minutes, no local files
+    assert web.new_visits(state) == []                                 # unchanged file: not read again
+
+
+def test_dns_blocking_scripts(tmp_path):
+    for script in (harden.dns_block_script(), harden.dns_restore_script()):
+        f = tmp_path / "d.ps1"
+        f.write_text(script, "utf8")
+        code, out = core.powershell(f"$e=$null;[void][Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText({core.quoted(f)}),[ref]$null,[ref]$e);'errors '+$e.Count")
+        assert "errors 0" in out, out
+    assert "9.9.9.9" in harden.dns_block_script() and "-Physical" in harden.dns_block_script()       # VPN adapters left alone
+    assert "TryParse" in harden.dns_restore_script()                                              # saved file can't inject anything
+    assert isinstance(harden.quad9_on(), bool)
 
 
 def test_bait_alarm(ctx, tmp_path):

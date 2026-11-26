@@ -26,7 +26,7 @@ try:
 except ImportError:
     yara = None
 
-from . import detect
+from . import detect, web
 from .core import DATA, ROOT, folders, run
 
 CLEAN, SUSPICIOUS, DANGEROUS, MALWARE = range(4)
@@ -650,13 +650,18 @@ class Intel:
         "drop": "https://www.spamhaus.org/drop/drop.txt",
         "vulndrivers": "https://raw.githubusercontent.com/magicsword-io/LOLDrivers/main/detections/hashes/samples_vulnerable.sha256",
         "baddrivers": "https://raw.githubusercontent.com/magicsword-io/LOLDrivers/main/detections/hashes/samples_malicious.sha256",
+        # Phishing and scam sites: live phishing pages (OpenPhish), and ~400,000 active phishing site names (Phishing.Database, MIT).
+        "openphish": "https://openphish.com/feed.txt",
+        "phishing": "https://raw.githubusercontent.com/Phishing-Database/Phishing.Database/master/phishing-domains-ACTIVE.txt",
     }
+    DAILY = {"phishing"}        # 11 MB: once a day is plenty
     EMPTY = hashlib.sha256(b"").hexdigest()
 
     def __init__(self, folder=None):
         self.dir = Path(folder or DATA / "intel")
         self.dir.mkdir(parents=True, exist_ok=True)
         self.hashes, self.vuln_drivers, self.ips, self._lo, self._hi = set(), set(), set(), [], []
+        self.phish_live, self.phish = set(), web.SiteList()
         self.updated, self.errors = 0.0, {}
         self._lock = threading.Lock()
         self.load()
@@ -670,6 +675,8 @@ class Intel:
         self.hashes = hashes("hashes") | hashes("baddrivers")
         self.vuln_drivers = hashes("vulndrivers")
         self.ips = set(re.findall(r"(?m)^(\d+\.\d+\.\d+\.\d+)\s*$", text("feodo")))
+        self.phish_live = set(web.parse_urls(text("openphish")))
+        self.phish = web.SiteList(web.parse_domains(text("phishing")))
         nets = sorted((int(n.network_address), int(n.broadcast_address)) for n in self._nets(text("drop")))
         self._lo, self._hi = [a for a, _ in nets], [b for _, b in nets]
         stamps = [(self.dir / (n + ".txt")).stat().st_mtime for n in self.FEEDS if (self.dir / (n + ".txt")).exists()]
@@ -687,9 +694,12 @@ class Intel:
         with self._lock:
             self.errors = {}
             for name, url in self.FEEDS.items():
+                f = self.dir / (name + ".txt")
+                if name in self.DAILY and f.exists() and time.time() - f.stat().st_mtime < 20 * 3600:
+                    continue
                 try:
                     text = fetch(url, 20_000_000).decode("utf8", "replace")
-                    ok = re.search(r"(?m)^(#|;|\d+\.\d+|[0-9a-fA-F]{64}\s*$)", text)
+                    ok = re.search(r"(?m)^(#|;|\d+\.\d+|[0-9a-fA-F]{64}\s*$|https?://\S+$|[a-z0-9-]+(\.[a-z0-9-]+)+\s*$)", text)
                     if not ok or "<html" in text[:500].lower():
                         raise ValueError("unexpected content")
                     tmp = self.dir / (name + ".tmp")
@@ -699,6 +709,15 @@ class Intel:
                     self.errors[name] = str(e)[:160]
             self.load()
         return not self.errors
+
+    def bad_site(self, host):
+        """Which phishing list a site name is on, or None."""
+        host = (host or "").lower().rstrip(".")
+        if host in self.phish_live:
+            return "live phishing list (OpenPhish)"
+        if host in self.phish:
+            return "phishing site list (Phishing.Database)"
+        return None
 
     def bad_ip(self, ip):
         if ip in self.ips:

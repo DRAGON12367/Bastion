@@ -7,6 +7,12 @@
         tools:ignore="QueryAllPackagesPermission" />
     <!-- Only to download the public stalkerware list. Nothing about this phone is sent. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- To see whether Private DNS (dangerous-site blocking) is on, and to download the big phishing list only on Wi-Fi. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- To tell you when a new app looks like spyware. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- To keep the 24/7 check scheduled after the phone restarts. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:label="Bastion"
@@ -21,11 +27,30 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Share" a link to Bastion to check it. -->
+            <intent-filter android:label="Check link with Bastion">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
+        <service
+            android:name=".GuardJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
