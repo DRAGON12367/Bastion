@@ -10,3 +10,5 @@ When something looks wrong it may ask the antivirus on this PC (Microsoft Defend
 The optional AI only talks to Ollama on this PC (127.0.0.1).
 
 Alerts (90 days), settings, quarantine, the learned habits and AI opinions are kept in `%LOCALAPPDATA%\Bastion`. Uninstalling removes automatic start and the bait files, and leaves that folder so quarantined files are not lost. Delete it yourself when you no longer need them.
+
+**Android app.** It looks at the list of installed apps and their permissions on your phone, and downloads the public stalkerware list from GitHub. Nothing about you, your apps or your phone is sent anywhere, and its data is excluded from cloud backups.

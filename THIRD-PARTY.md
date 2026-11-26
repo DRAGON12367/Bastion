@@ -12,3 +12,5 @@
 
 # Downloaded while running, not included
 YARA Forge core rules (each rule keeps its author's licence), LOLDrivers, Feodo Tracker and Spamhaus DROP. Each has its own terms.
+
+The Android app downloads the stalkerware indicators list maintained by the Echap association (https://github.com/AssoEchap/stalkerware-indicators) while running; it is not included in the app.

@@ -1,0 +1,52 @@
+plugins {
+    id "com.android.application"
+}
+
+// Release signing comes from a file OUTSIDE this repository (keystore.properties: storeFile, storePassword, keyAlias, keyPassword),
+// pointed to by the BASTION_ANDROID_SIGNING environment variable. Without it, release builds are signed with the debug key.
+def signingFile = System.getenv("BASTION_ANDROID_SIGNING")
+def signing = new Properties()
+if (signingFile != null && file(signingFile).exists()) {
+    file(signingFile).withInputStream { signing.load(it) }
+}
+
+android {
+    namespace "io.github.dragon12367.bastion"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "io.github.dragon12367.bastion"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    signingConfigs {
+        release {
+            if (signing.getProperty("storeFile")) {
+                storeFile file(signing.getProperty("storeFile"))
+                storePassword signing.getProperty("storePassword")
+                keyAlias signing.getProperty("keyAlias")
+                keyPassword signing.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signing.getProperty("storeFile") ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    dependenciesInfo {
+        includeInApk false      // no Google-only dependency metadata in the APK
+        includeInBundle false
+    }
+}
