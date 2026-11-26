@@ -95,6 +95,8 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
         new Thread(() -> {
+            String[] u = GuardJob.updateDue(this);
+            if (u != null) ui.post(() -> showUpdate(u));
             PhishLists p = new PhishLists(this);
             p.refresh(false);
             ui.post(() -> { phish = p; handleShare(getIntent()); });
@@ -106,6 +108,15 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
         handleShare(i);
+    }
+
+    private void showUpdate(String[] u) {
+        LinearLayout c = card();
+        c.addView(text("Bastion " + u[0] + " is available", 17, GOOD, true));
+        c.addView(text("Download it, then open it: Android installs it as an update to the Bastion you have. Android only accepts it if it really comes from the same developer.", 14, TEXT, false));
+        c.addView(button("Download update", true, v -> open(new Intent(Intent.ACTION_VIEW, Uri.parse(u[1])))));
+        c.addView(button("What's new", false, v -> open(new Intent(Intent.ACTION_VIEW, Uri.parse(u[2])))));
+        ((LinearLayout) list.getParent()).addView(c, 1);
     }
 
     private void handleShare(Intent i) {

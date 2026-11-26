@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QLabel, QLineEdit, QListWidget, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QSystemTrayIcon,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from . import ai, core, engine as E, harden, scanner, telemetry, web
+from . import ai, core, engine as E, harden, scanner, telemetry, updater, web
 from .core import HIGH, LEVELS, MEDIUM
 
 GOOD, WARN, BAD, DIM = "#4cc38a", "#e0a73c", "#e5534b", "#8b96a5"
@@ -184,11 +184,23 @@ class Window(QMainWindow):
         h.addSpacing(14)
         h.addLayout(t, 1)
         v.addWidget(top)
+        self.up_box = QFrame()
+        self.up_box.setObjectName("card")
+        ub = QHBoxLayout(self.up_box)
+        self.up_text = label()
+        self.up_text.setTextFormat(Qt.PlainText)
+        ub.addWidget(self.up_text, 1)
+        self.up_btn = button("Update now", self.update_now, True)
+        ub.addWidget(self.up_btn)
+        ub.addWidget(button("What's new", lambda: self.ctx.update and os.startfile(self.ctx.update.page)))
+        self.up_box.setVisible(False)
+        self._told_update = ""
+        v.addWidget(self.up_box)
         self.cards, grid = {}, QGridLayout()
         grid.setSpacing(10)
         for i, (n, what) in enumerate((("Files", "New downloads and files"), ("Programs", "What starts and how"), ("Ransomware", "Bait files and mass changes"),
                                        ("Startup", "New auto-start entries"), ("Network", "Known bad servers"), ("USB drives", "Checked when plugged in"), ("Defender", "Windows' own engine"),
-                                       ("RAT", "Remote control and spying"), ("Rootkit", "Drivers and hidden programs"), ("AI", "Explains and learns"), ("Scanner", "Daily scan and signatures"), ("Web", "Phishing sites you open"))):
+                                       ("RAT", "Remote control and spying"), ("Rootkit", "Drivers and hidden programs"), ("AI", "Explains and learns"), ("Scanner", "Daily scan and signatures"), ("Web", "Phishing sites you open"), ("Updates", "Checks once a day"))):
             c = QFrame()
             c.setObjectName("card")
             cv = QVBoxLayout(c)
@@ -376,6 +388,13 @@ class Window(QMainWindow):
         check("Download public block lists every 6 hours (abuse.ch, Spamhaus, LOLDrivers, YARA Forge; nothing about this PC is sent)", s["intel_updates"], lambda on: s.__setitem__("intel_updates", on))
         self.auto = check("Run 24/7: start with Windows and restart if it stops", core.autostart_on(), self.set_auto)
         check("Check sites I open in my browsers against phishing lists (only site names are looked at, on this PC; nothing is sent)", s["watch_browsing"], lambda on: s.__setitem__("watch_browsing", on))
+        check("Check GitHub once a day for a newer Bastion (nothing about you is sent)", s["check_updates"], lambda on: s.__setitem__("check_updates", on))
+        h2 = QHBoxLayout()
+        h2.addWidget(button("Check for updates now", self.check_updates_now))
+        self.upd_text = label(f"Version {core.VERSION}", "dim")
+        h2.addWidget(self.upd_text)
+        h2.addStretch()
+        v.addLayout(h2)
         check("Send an anonymous usage ping (off by default) — a random id and the version only, no IP or personal data, so the author can count how many people use Bastion", s["usage_ping"], lambda on: s.__setitem__("usage_ping", on))
         h = QHBoxLayout()
         h.addWidget(QLabel("Pop up for"))
@@ -425,6 +444,14 @@ class Window(QMainWindow):
             ok = g.is_alive() and g.state == "on"
             c = self.cards[g.label]
             c.setText(f"<span style='color:{GOOD if ok else WARN}'>{'On' if ok else g.state}</span>")
+        u = self.ctx.update
+        self.up_box.setVisible(bool(u))
+        if u:
+            if not self.up_btn.text().startswith(("Downloading", "Installing")):
+                self.up_text.setText(f"Bastion {u.version} is available. You have {core.VERSION}.")
+            if self._told_update != u.version:
+                self._told_update = u.version
+                self.tray.showMessage("Bastion update", f"Bastion {u.version} is available. Open Bastion to update.", QIcon(shield(GOOD)), 9000)
         held = list(self.ctx.held.items())
         self.held_box.setVisible(bool(held))
         if held:
@@ -548,6 +575,22 @@ class Window(QMainWindow):
             self.results = sorted(out.found, key=lambda r: -r.score)
             self.show_found()
             self.scan_text.setText(scanner.summary(out))
+        elif name == "update-progress":
+            self.up_btn.setText("Installing")
+            self.up_text.setText("Waiting for Windows to approve the update")
+            return
+        elif name == "update":
+            self.up_btn.setEnabled(True)
+            self.up_btn.setText("Update now")
+            self.up_text.setText(f"Update failed: {out}" if isinstance(out, Exception) else "Installing: Bastion will close and start again.")
+            return
+        elif name == "updatecheck":
+            if isinstance(out, Exception):
+                self.upd_text.setText(f"Could not reach GitHub: {str(out)[:120]}")
+            else:
+                self.ctx.update = out
+                self.upd_text.setText(f"Bastion {out.version} is available: see the Protection page." if out else f"You have the newest Bastion ({core.VERSION}).")
+            return
         elif name == "harden":
             self.h_text.setText("Done. The list updates in a moment." if out[0] else out[1])
             g = next((g for g in self.ctx.guards if g.label == "Defender"), None)
@@ -656,6 +699,31 @@ class Window(QMainWindow):
         if telemetry.PING_URL:
             self.ctx.settings["usage_ping"] = self.ask("May Bastion send an anonymous usage ping?\n\nIt would send only a random id and the version number — never your IP, your name or anything about your files — so the author can count how many people use Bastion. You can change this any time in Settings.\n\nThis is optional and off unless you choose Yes.")
         self.auto.setChecked(self.ask("Keep Bastion running all the time? It will start with Windows and start again if something closes it."))
+
+    def update_now(self):
+        u = self.ctx.update
+        if not u:
+            return
+        if not core.FROZEN:
+            os.startfile(u.page)
+            return
+        if not self.ask(f"Update to Bastion {u.version}?\n\nIt downloads from this project's GitHub releases, is checked against the checksum GitHub published, "
+                        "and Windows will ask for administrator approval. Bastion closes and starts again by itself."):
+            return
+        self.up_btn.setEnabled(False)
+        self.up_btn.setText("Downloading")
+        self.up_text.setText(f"Downloading Bastion {u.version}")
+
+        def job():
+            path = updater.download(u, str(core.DATA / "updates"))
+            self.bridge.done.emit("update-progress", None)
+            updater.install(path)
+            return path
+        self.work("update", job)
+
+    def check_updates_now(self):
+        self.upd_text.setText("Asking GitHub")
+        self.work("updatecheck", updater.check)
 
     def set_auto(self, on):
         code, out = core.set_autostart(on)

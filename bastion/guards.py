@@ -19,7 +19,9 @@ import psutil
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from . import ai, engine as E, scanner, telemetry, web
+import requests
+
+from . import ai, engine as E, scanner, telemetry, updater, web
 from .core import CRITICAL, DATA, HIGH, INFO, LOW, MEDIUM, folders, memory_short, playing, powershell, run
 
 WINDIR = os.environ.get("SystemRoot", r"C:\Windows").lower()
@@ -1032,6 +1034,29 @@ class WebGuard(Guard):
                                  f"{host}\nIt is on the {why}.\nClose that page. If you typed a password or card number there, change it now from a safe device.", host)
 
 
+class UpdateGuard(Guard):
+    """Asks GitHub once a day whether a newer Bastion is out. Installing always waits for the owner."""
+    label, every = "Updates", 3600.0
+
+    def setup(self):
+        self.state = updater.State()
+
+    def status(self):
+        return "on" if self.ctx.settings["check_updates"] else "switched off"
+
+    def step(self):
+        if not self.ctx.settings["check_updates"] or not self.state.due():
+            return
+        try:
+            u = updater.check()
+        except (requests.RequestException, ValueError):
+            return                      # offline: try again next hour, without calling the guard broken
+        self.state.mark(u.version if u else "")
+        self.ctx.update = u
+        if u:
+            self.ctx.log.add(INFO, self.label, f"Bastion {u.version} is available", "Open Bastion and choose Update now.", u.version)
+
+
 class AIGuard(Guard):
     """Feeds alerts to the local model, one at a time, when the PC has room for it."""
     label, every = "AI", 5.0
@@ -1074,13 +1099,14 @@ class Context:
         self.engine = E.Engine(settings, intel)
         self.stop, self.scan_lock = threading.Event(), threading.Lock()
         self.defender = None
+        self.update = None
         self.ransom = RansomGuard(self)
         self.habits, self.ai = ai.Habits(), ai.Analyst(self)
         self.guards = []
         self.held = {}       # pid -> (psutil.Process, why)
 
     def start(self):
-        self.guards = [self.ransom, FileGuard(self), ProcessGuard(self), StartupGuard(self), NetworkGuard(self), DriveGuard(self), DefenderGuard(self), RatGuard(self), RootkitGuard(self), AIGuard(self), ScanGuard(self), WebGuard(self)]
+        self.guards = [self.ransom, FileGuard(self), ProcessGuard(self), StartupGuard(self), NetworkGuard(self), DriveGuard(self), DefenderGuard(self), RatGuard(self), RootkitGuard(self), AIGuard(self), ScanGuard(self), WebGuard(self), UpdateGuard(self)]
         self.log.listeners.append(self.ai.offer)
         for g in self.guards:
             g.start()

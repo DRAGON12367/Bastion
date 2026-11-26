@@ -44,6 +44,8 @@ Name: desktop; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 [Run]
 ; as the person who started the installer, so automatic start is set up for them and not for the administrator
 Filename: "{app}\Bastion.exe"; Description: "{cm:LaunchProgram,Bastion}"; Flags: postinstall nowait runasoriginaluser skipifsilent
+; after an automatic (silent) update, start Bastion again for the person who approved it
+Filename: "{app}\Bastion.exe"; Parameters: "--tray"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{app}\Bastion.exe"; Parameters: "--uninstall"; Flags: runhidden waituntilterminated; RunOnceId: "traces"

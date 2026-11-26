@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import psutil
 import pytest
 
-from bastion import core, engine as E, guards as G, harden, scanner as S, telemetry, web
+from bastion import core, engine as E, guards as G, harden, scanner as S, telemetry, updater, web
 
 
 @pytest.fixture
@@ -215,6 +215,7 @@ def test_scan_schedule(ctx):
 
 
 def test_scheduled_scan_reports_honestly(ctx, monkeypatch):
+    monkeypatch.setattr(G, "playing", lambda: False)      # the result must not depend on what is on the screen
     for reply, level in (((0, "Scan finished."), core.INFO), ((2, "Scan failed"), core.LOW), ((2, "Scanning found 2 threats."), core.CRITICAL)):
         monkeypatch.setattr(G, "run", lambda *a, r=reply: r)
         g = G.DefenderGuard(ctx)
@@ -279,6 +280,7 @@ def test_ai_does_not_feed_itself(ctx):
 
 def test_ai_stays_out_of_the_way(ctx, monkeypatch):
     from bastion import ai
+    monkeypatch.setattr(ai, "playing", lambda: False)
     class R:
         def __init__(self, models): self.m = models
         def json(self): return {"models": [{"name": n} for n in self.m]}
@@ -837,6 +839,95 @@ def test_dns_blocking_scripts(tmp_path):
     assert "9.9.9.9" in harden.dns_block_script() and "-Physical" in harden.dns_block_script()       # VPN adapters left alone
     assert "TryParse" in harden.dns_restore_script()                                              # saved file can't inject anything
     assert isinstance(harden.quad9_on(), bool)
+
+
+def release(tag="v9.0.0", url=None, digest=None, size=1000, **extra):
+    name = "Bastion-Setup-%s.exe" % tag.lstrip("v")
+    return dict({"tag_name": tag, "html_url": "https://github.com/DRAGON12367/Bastion/releases/tag/" + tag, "body": "notes",
+                 "assets": [{"name": name, "size": size, "digest": "sha256:" + "a" * 64 if digest is None else digest,
+                             "browser_download_url": url or updater.DOWNLOADS + tag + "/" + name}]}, **extra)
+
+
+def test_update_offer_only_for_safe_newer_releases():
+    assert updater.pick(release("v9.0.0"), "1.2.0").version == "9.0.0"
+    assert updater.pick(release("v1.2.0"), "1.2.0") is None and updater.pick(release("v1.1.9"), "1.2.0") is None      # never older or the same
+    assert updater.pick(release("v1.10.0"), "1.9.0").version == "1.10.0"                                                 # numbers, not text
+    assert updater.pick(release(prerelease=True), "1.2.0") is None and updater.pick(release(draft=True), "1.2.0") is None
+    assert updater.pick(release(url="https://evil.example/Bastion-Setup-9.0.0.exe"), "1.2.0") is None                    # other sites refused
+    assert updater.pick(release(url="https://github.com/someone-else/Bastion/releases/download/v9.0.0/Bastion-Setup-9.0.0.exe"), "1.2.0") is None
+    assert updater.pick(release(digest="md5:abc"), "1.2.0") is None and updater.pick(release(digest=""), "1.2.0") is None
+    assert updater.pick(release(size=10 ** 9), "1.2.0") is None
+    assert updater.pick(release("v9.0.0-beta"), "1.2.0") is None and updater.pick({"tag_name": None}, "1.2.0") is None and updater.pick("junk", "1.2.0") is None
+
+
+class FakeWeb:
+    trust_env = True
+    def __init__(self, data): self.data = data
+    def get(self, url, **k):
+        data = self.data
+        class R:
+            def raise_for_status(self): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+            def iter_content(self, n):
+                for i in range(0, len(data), n):
+                    yield data[i:i + n]
+        return R()
+
+
+def test_update_download_is_verified(tmp_path):
+    import hashlib
+    good = b"installer bytes" * 1000
+    u = updater.Update("9.0.0", "", updater.DOWNLOADS + "v9.0.0/Bastion-Setup-9.0.0.exe", hashlib.sha256(good).hexdigest(), len(good), "")
+    path = updater.download(u, str(tmp_path), session=FakeWeb(good))
+    assert open(path, "rb").read() == good
+    with pytest.raises(ValueError, match="checksum"):
+        updater.download(u, str(tmp_path / "b"), session=FakeWeb(b"tampered" + good[8:]))
+    assert not list((tmp_path / "b").glob("*.exe")) and not list((tmp_path / "b").glob("*.part"))        # a bad file is never left to run
+    with pytest.raises(ValueError, match="bigger"):
+        updater.download(u, str(tmp_path / "c"), session=FakeWeb(good + b"x" * 5000))
+    u.url = "https://evil.example/x.exe"
+    with pytest.raises(ValueError):
+        updater.download(u, str(tmp_path / "d"), session=FakeWeb(good))
+
+
+def test_update_install_needs_the_installed_app(tmp_path):
+    with pytest.raises(RuntimeError, match="source"):
+        updater.install(str(tmp_path / "x.exe"))          # running from source: never runs a downloaded file
+
+
+def test_update_guard_checks_daily_and_stays_quiet_offline(ctx, monkeypatch, tmp_path):
+    monkeypatch.setattr(updater.State, "__init__", lambda self, path=None: (setattr(self, "path", tmp_path / "u.json"), setattr(self, "d", {}))[0])
+    g = G.UpdateGuard(ctx)
+    g.setup()
+    def offline():
+        raise updater.requests.ConnectionError("offline")
+    monkeypatch.setattr(updater, "check", offline)
+    g.step()
+    assert g.status() == "on" and ctx.update is None and g.state.due()        # offline is not an error, and it tries again
+    offer = updater.Update("9.0.0", "p", updater.DOWNLOADS + "v9.0.0/Bastion-Setup-9.0.0.exe", "a" * 64, 10, "")
+    calls = []
+    monkeypatch.setattr(updater, "check", lambda: calls.append(1) or offer)
+    g.step()
+    g.step()
+    assert ctx.update is offer and len(calls) == 1 and "9.0.0" in ctx.log.latest(1)[0][4]          # once a day only
+    ctx.settings["check_updates"] = False
+    g.state.d = {}
+    g.step()
+    assert len(calls) == 1 and g.status() == "switched off"
+
+
+def test_update_banner_shows(ctx):
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+    from bastion.gui import Window
+    w = Window(ctx)
+    w.refresh()
+    assert not w.up_box.isVisibleTo(w)
+    ctx.update = updater.Update("9.0.0", "p", updater.DOWNLOADS + "v9.0.0/Bastion-Setup-9.0.0.exe", "a" * 64, 10, "")
+    w.refresh()
+    assert w.up_box.isVisibleTo(w) and "9.0.0" in w.up_text.text()
+    w.tray.hide()
 
 
 def test_bait_alarm(ctx, tmp_path):

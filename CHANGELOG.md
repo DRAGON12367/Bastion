@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.0
+Automatic update alerts on PC and phone.
+
+- **Windows:** Bastion asks GitHub once a day whether a newer version is out, shows it on the Protection page and in a notification, and **Update now** downloads it, checks it against the SHA-256 GitHub published, and installs it (Windows asks for administrator approval). Bastion restarts by itself afterwards. Can be switched off in Settings; there's also a "Check for updates now" button.
+- **Android:** checks once a day and notifies you; tap to download, and Android installs it as an update. Android only accepts it if it is signed by the same developer as the Bastion you have.
+- Updates are only ever taken from this project's own GitHub releases, only if newer, never pre-releases.
+- If you have 1.1.0 or older, install 1.2.0 by hand once; from then on you'll be told about updates.
+
 ## v1.1.0
 Web protection on PC and phone, and 24/7 checks on Android.
 

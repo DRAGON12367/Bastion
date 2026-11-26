@@ -5,6 +5,8 @@ Bastion has no account and no ads. By default it has no telemetry and keeps noth
 
 **Browser check (Windows, can be switched off).** Bastion reads the names of sites newly opened in your browsers (from each browser's own history file on your PC) and checks them against phishing lists on your PC. It does not read page contents, does not keep a record of your browsing, and sends nothing anywhere. Only the time of the last visit it checked is remembered.
 
+**Update check.** Once a day Bastion (Windows and Android) asks GitHub which release is newest. Nothing about you or your device is sent; GitHub sees the request like any download. On Windows you can switch it off in Settings.
+
 It **downloads** public lists, which shows those servers your IP address like any web visit: feodotracker.abuse.ch, spamhaus.org, openphish.com and GitHub (LOLDrivers, YARA Forge, Phishing.Database). The optional Quad9 setting sends your DNS lookups to Quad9 (Swiss non-profit, no IP logging) instead of your internet provider. Switch this off in Settings.
 
 When something looks wrong it may ask the antivirus on this PC (Microsoft Defender) to look too. Defender has its own privacy settings.

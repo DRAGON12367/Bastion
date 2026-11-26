@@ -74,6 +74,62 @@ public class GuardJob extends JobService {
         }
         p.edit().putStringSet("flagged", flagged).putStringSet("powerful", powerful).putLong("lastCheck", System.currentTimeMillis()).apply();
         new PhishLists(c).refresh(false);
+        String[] u = updateDue(c);
+        if (u != null && !u[0].equals(p.getString("toldUpdate", ""))) {
+            p.edit().putString("toldUpdate", u[0]).apply();
+            notifyLink(c, 777, "Bastion " + u[0] + " is available", "Tap to download it. Android installs it as an update to the Bastion you have.", u[1]);
+        }
+    }
+
+    /** Asks GitHub at most once a day for a newer Bastion. {version, apkUrl, page} or null. Never raises. */
+    static String[] updateDue(Context c) {
+        SharedPreferences p = c.getSharedPreferences("bastion", MODE_PRIVATE);
+        if (System.currentTimeMillis() - p.getLong("updateChecked", 0) < 86_400_000L) {
+            String v = p.getString("updateVersion", "");
+            return v.isEmpty() ? null : new String[]{v, p.getString("updateUrl", ""), p.getString("updatePage", "")};
+        }
+        try {
+            java.net.HttpURLConnection h = (java.net.HttpURLConnection) new java.net.URL(Updates.API).openConnection();
+            h.setConnectTimeout(15_000);
+            h.setReadTimeout(20_000);
+            h.setRequestProperty("Accept", "application/vnd.github+json");
+            h.setRequestProperty("User-Agent", "Bastion-update-check");
+            String json;
+            try (java.io.InputStream in = new PhishLists.LimitedStream(h.getInputStream(), 2_000_000)) {
+                java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+                byte[] b = new byte[16384];
+                int n;
+                while ((n = in.read(b)) > 0) buf.write(b, 0, n);       // readAllBytes() needs Android 13
+                json = new String(buf.toByteArray(), java.nio.charset.StandardCharsets.UTF_8);
+            } finally {
+                h.disconnect();
+            }
+            String current = c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
+            String[] u = Updates.newer(json, current);
+            p.edit().putLong("updateChecked", System.currentTimeMillis())
+                    .putString("updateVersion", u == null ? "" : u[0]).putString("updateUrl", u == null ? "" : u[1]).putString("updatePage", u == null ? "" : u[2]).apply();
+            return u;
+        } catch (Exception e) {
+            return null;            // offline: try again later
+        }
+    }
+
+    static void notifyLink(Context c, int id, String title, String text, String url) {
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        if (Build.VERSION.SDK_INT >= 26)
+            nm.createNotificationChannel(new NotificationChannel("updates", "Updates", NotificationManager.IMPORTANCE_DEFAULT));
+        PendingIntent open = PendingIntent.getActivity(c, id, new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Notification n = new Notification.Builder(c, "updates")
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build();
+        try { nm.notify(id, n); } catch (SecurityException ignored) { }
     }
 
     static void notify(Context c, int id, String title, String text) {
