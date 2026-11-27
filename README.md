@@ -3,15 +3,11 @@
 A free guard for Windows 10 and 11 PCs (64-bit) and Android phones. It works **beside** your antivirus and does not replace it.
 
 <p align="center">
-  <a href="https://github.com/DRAGON12367/Bastion/releases/latest/download/Bastion-Setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download-Windows-0d4a63?style=for-the-badge&logo=windows&logoColor=white" height="56"></a>
+  <a href="https://github.com/DRAGON12367/Bastion/releases/latest/download/Bastion-Setup.exe"><img alt="Download for Windows" src="docs/download-windows.svg" width="340"></a>
   &nbsp;
-  <a href="https://github.com/DRAGON12367/Bastion/releases/latest/download/Bastion-Android.apk"><img alt="Download for Android" src="https://img.shields.io/badge/Download-Android-0d4a63?style=for-the-badge&logo=android&logoColor=white" height="56"></a>
+  <a href="https://github.com/DRAGON12367/Bastion/releases/latest/download/Bastion-Android.apk"><img alt="Download for Android" src="docs/download-android.svg" width="340"></a>
 </p>
-<p align="center">
-  <a href="https://github.com/DRAGON12367/Bastion/releases/latest"><img alt="Latest version" src="https://img.shields.io/github/v/release/DRAGON12367/Bastion?label=latest&color=3fd8ff"></a>
-  <img alt="Free" src="https://img.shields.io/badge/price-free-3fd8ff">
-  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-3fd8ff">
-</p>
+<p align="center"><b>Free</b> · MIT license · <a href="https://github.com/DRAGON12367/Bastion/releases/latest">Latest version and checksums</a></p>
 
 ## Install in 3 steps
 
