@@ -29,8 +29,8 @@ import java.util.Set;
 
 /** One screen: a summary, the phone's health checks, and the apps worth a look. Nothing is ever changed without the user tapping. */
 public class MainActivity extends Activity {
-    static final int BG = 0xFF10151C, CARD = 0xFF171E28, LINE = 0xFF222C39, TEXT = 0xFFE2E8F0, DIM = 0xFF8B96A5;
-    static final int GOOD = 0xFF4CC38A, WARN = 0xFFE0A73C, BAD = 0xFFE5534B, ACCENT = 0xFF1F7A55;
+    static final int BG = 0xFF04080D, CARD = 0xC80A1E2C, LINE = 0xFF16506A, TEXT = 0xFFD8F3FF, DIM = 0xFF7F9BB0;
+    static final int GOOD = 0xFF3FD8FF, WARN = 0xFFFFB547, BAD = 0xFFFF4D5E, ACCENT = 0xFF0D4A63;
 
     private LinearLayout list;
     private TextView headline, subline;
@@ -41,6 +41,8 @@ public class MainActivity extends Activity {
     private LinearLayout linkResult;
     private EditText linkBox;
     private PhishLists phish;
+    private Reactor reactor;
+    private TextView feed;
 
     @Override
     protected void onCreate(Bundle saved) {
@@ -50,7 +52,7 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(BG);
 
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(BG);
+        scroll.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFF0B1C2A, BG, BG}));
         scroll.setFillViewport(true);
         LinearLayout root = column();
         root.setPadding(dp(18), dp(28), dp(18), dp(28));
@@ -61,6 +63,10 @@ public class MainActivity extends Activity {
         headline = text("Ready to check this phone", 20, TEXT, true);
         subline = text("Looks at installed apps and phone settings. Nothing about you is sent anywhere.", 14, DIM, false);
         scanButton = button("Check this phone", true, v -> scan());
+        reactor = new Reactor(this);
+        top.addView(reactor, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(200)));
+        title.setLetterSpacing(0.12f);
+        title.setGravity(Gravity.CENTER);
         top.addView(title);
         top.addView(space(6));
         top.addView(headline);
@@ -68,7 +74,19 @@ public class MainActivity extends Activity {
         top.addView(subline);
         top.addView(space(14));
         top.addView(scanButton);
+        feed = text("", 12, 0xFFC9E7F2, false);
+        feed.setTypeface(Typeface.MONOSPACE);
+        feed.setPadding(dp(10), dp(8), dp(10), dp(8));
+        GradientDrawable fb = new GradientDrawable();
+        fb.setColor(0xE6040C14);
+        fb.setCornerRadius(dp(6));
+        fb.setStroke(dp(1), 0xFF1C5A77);
+        feed.setBackground(fb);
+        top.addView(space(12));
+        top.addView(text("LIVE FEED", 11, 0xFF5F8AA0, true));
+        top.addView(feed);
         root.addView(top);
+        say("Bastion online. Checks run on this phone only.");
 
         LinearLayout link = card();
         link.addView(text("Check a link", 17, TEXT, true));
@@ -99,7 +117,7 @@ public class MainActivity extends Activity {
             if (u != null) ui.post(() -> showUpdate(u));
             PhishLists p = new PhishLists(this);
             p.refresh(false);
-            ui.post(() -> { phish = p; handleShare(getIntent()); });
+            ui.post(() -> { phish = p; say("Phishing lists ready: " + p.size() + " sites."); handleShare(getIntent()); });
         }, "lists").start();
         scan();
     }
@@ -131,6 +149,7 @@ public class MainActivity extends Activity {
 
     private void showLink(String text) {
         Links.Result r = Links.check(text, phish);
+        say("Link checked: " + r.headline);
         linkResult.removeAllViews();
         int colour = r.level == Links.DANGER ? BAD : r.level == Links.CAUTION ? WARN : GOOD;
         linkResult.addView(space(8));
@@ -146,6 +165,8 @@ public class MainActivity extends Activity {
         scanButton.setText("Checking…");
         headline.setText("Checking this phone");
         subline.setText("Looking at installed apps and settings.");
+        reactor.setState(GOOD, "SCANNING", true);
+        say("Scanning installed apps and phone settings.");
         Set<String> trusted = new HashSet<>(prefs.getStringSet("trusted", new HashSet<>()));
         new Thread(() -> {
             Scanner.Report r;
@@ -166,6 +187,8 @@ public class MainActivity extends Activity {
         list.removeAllViews();
         if (r == null) {
             headline.setText("The check could not finish");
+            reactor.setState(WARN, "STANDBY", false);
+            say("Check failed. Tap to try again.");
             subline.setText("Please try again.");
             return;
         }
@@ -175,6 +198,8 @@ public class MainActivity extends Activity {
             else if (a.verdict.level == Judge.CHECK) check++;
         }
         for (Scanner.Check c : r.checks) if (!c.ok) weak++;
+        reactor.setState(known > 0 ? BAD : check > 0 || weak > 0 ? WARN : GOOD, known > 0 ? "ALERT" : check > 0 ? "CAUTION" : "SECURE", false);
+        say(r.appsLooked + " apps checked: " + known + " known bad, " + check + " to look at, " + weak + " weak setting" + (weak == 1 ? "." : "s."));
         if (known > 0) {
             headline.setText("Known stalkerware found");
             headline.setTextColor(BAD);
@@ -271,11 +296,20 @@ public class MainActivity extends Activity {
         return l;
     }
 
+    /** A line in the live feed; keeps the last eight. Only real events are written here. */
+    private void say(String line) {
+        String stamp = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(new java.util.Date());
+        String[] old = String.valueOf(feed.getText()).split("\n");
+        StringBuilder b = new StringBuilder();
+        for (int i = Math.max(0, old.length - 7); i < old.length; i++) if (!old[i].isEmpty()) b.append(old[i]).append('\n');
+        feed.setText(b.append('[').append(stamp).append("] ").append(line));
+    }
+
     private LinearLayout card() {
         LinearLayout l = column();
         GradientDrawable g = new GradientDrawable();
         g.setColor(CARD);
-        g.setCornerRadius(dp(12));
+        g.setCornerRadius(dp(6));
         g.setStroke(dp(1), LINE);
         l.setBackground(g);
         l.setPadding(dp(16), dp(14), dp(16), dp(14));
@@ -323,8 +357,9 @@ public class MainActivity extends Activity {
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         b.setGravity(Gravity.CENTER);
         GradientDrawable g = new GradientDrawable();
-        g.setColor(main ? ACCENT : 0xFF22303F);
-        g.setCornerRadius(dp(8));
+        g.setColor(main ? ACCENT : 0xFF0B2231);
+        g.setCornerRadius(dp(4));
+        g.setStroke(dp(1), main ? GOOD : 0xFF1C5A77);
         b.setBackground(g);
         b.setOnClickListener(click);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(46));

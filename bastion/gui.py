@@ -10,30 +10,40 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QLabel, QLineEdit, QListWidget, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QSystemTrayIcon,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
-from . import ai, core, engine as E, harden, scanner, telemetry, updater, web
+from . import ai, core, engine as E, harden, hud, scanner, telemetry, updater, web
 from .core import HIGH, LEVELS, MEDIUM
 
-GOOD, WARN, BAD, DIM = "#4cc38a", "#e0a73c", "#e5534b", "#8b96a5"
-COLOURS = [DIM, "#9aa7b8", WARN, "#ee7d3b", BAD]
+GOOD, WARN, BAD, DIM = "#3fd8ff", "#ffb547", "#ff4d5e", "#7f9bb0"
+COLOURS = [DIM, "#9ec3d6", WARN, "#ff8a3d", BAD]
 STYLE = """
-* { font-family: 'Segoe UI'; font-size: 13px; color: #e2e8f0; }
-QMainWindow, QStackedWidget, QMessageBox { background: #10151c; }
-QListWidget { background: #0b0f15; border: none; padding: 10px 6px; outline: 0; }
-QListWidget::item { padding: 11px 14px; border-radius: 6px; margin: 2px 4px; }
-QListWidget::item:selected { background: #1c2735; color: #fff; }
-QFrame#card { background: #171e28; border: 1px solid #222c39; border-radius: 10px; }
-QLabel#h1 { font-size: 22px; font-weight: 600; } QLabel#dim { color: #8b96a5; }
-QPushButton { background: #22303f; border: 1px solid #2d3d4f; border-radius: 6px; padding: 8px 16px; }
-QPushButton:hover { background: #2a3b4e; } QPushButton:disabled { color: #56616f; }
-QPushButton#main { background: #1f7a55; border-color: #26946a; font-weight: 600; } QPushButton#main:hover { background: #26946a; }
-QTableWidget { background: #141a23; border: 1px solid #222c39; border-radius: 8px; gridline-color: #1d2632; }
-QTableWidget::item { padding: 5px; } QTableWidget::item:selected { background: #22324a; }
-QHeaderView::section { background: #171e28; border: none; padding: 7px; color: #8b96a5; }
-QPlainTextEdit, QLineEdit { background: #141a23; border: 1px solid #222c39; border-radius: 8px; padding: 8px; }
-QComboBox { background: #22303f; border: 1px solid #2d3d4f; border-radius: 6px; padding: 6px 10px; }
-QComboBox QAbstractItemView { background: #171e28; }
-QProgressBar { background: #171e28; border: none; border-radius: 4px; height: 8px; text-align: center; color: transparent; }
-QProgressBar::chunk { background: #26946a; border-radius: 4px; }
+* { font-family: 'Segoe UI'; font-size: 13px; color: #d8f3ff; }
+QMainWindow, QMessageBox { background: qradialgradient(cx:0.5, cy:0.3, radius:1.1, stop:0 #0b1c2a, stop:1 #04080d); }
+QStackedWidget, QStackedWidget > QWidget { background: transparent; }
+QListWidget { background: #050a10; border: none; border-right: 1px solid #12384c; padding: 14px 6px; outline: 0; }
+QListWidget::item { padding: 11px 14px; border-radius: 4px; margin: 2px 4px; color: #7fb4cc; }
+QListWidget::item:selected { background: #0e2a3a; color: #3fd8ff; border-left: 3px solid #3fd8ff; }
+QListWidget::item:hover { background: #0a1d29; }
+QFrame#card { background: rgba(10, 30, 44, 0.78); border: 1px solid #16506a; border-radius: 6px; }
+QLabel#h1 { font-size: 22px; font-weight: 600; color: #e9fbff; } QLabel#dim { color: #7f9bb0; }
+QLabel#metric { font-family: 'Cascadia Mono', Consolas; font-size: 20px; color: #3fd8ff; }
+QLabel#mlabel { font-size: 10px; color: #5f8aa0; font-weight: 600; }
+QPushButton { background: #0b2231; border: 1px solid #1c5a77; border-radius: 4px; padding: 8px 16px; color: #bfeeff; }
+QPushButton:hover { background: #10324a; border-color: #3fd8ff; } QPushButton:disabled { color: #3f5868; border-color: #173445; }
+QPushButton#main { background: #0d4a63; border-color: #3fd8ff; font-weight: 600; color: #e9fbff; } QPushButton#main:hover { background: #136182; }
+QTableWidget { background: rgba(6, 18, 28, 0.85); border: 1px solid #16506a; border-radius: 6px; gridline-color: #0f2a3a; }
+QTableWidget::item { padding: 5px; } QTableWidget::item:selected { background: #10324a; }
+QHeaderView::section { background: #08192a; border: none; border-bottom: 1px solid #16506a; padding: 7px; color: #5f8aa0; }
+QPlainTextEdit, QLineEdit { background: rgba(4, 12, 20, 0.9); border: 1px solid #16506a; border-radius: 6px; padding: 8px; }
+QPlainTextEdit#feed { font-family: 'Cascadia Mono', Consolas; font-size: 12px; border-color: #1c5a77; }
+QLineEdit:focus { border-color: #3fd8ff; }
+QComboBox { background: #0b2231; border: 1px solid #1c5a77; border-radius: 4px; padding: 6px 10px; }
+QComboBox QAbstractItemView { background: #08192a; }
+QCheckBox::indicator { width: 14px; height: 14px; border: 1px solid #1c5a77; border-radius: 3px; background: #050a10; }
+QCheckBox::indicator:checked { background: #3fd8ff; border-color: #3fd8ff; }
+QProgressBar { background: #08192a; border: 1px solid #16506a; border-radius: 4px; height: 8px; text-align: center; color: transparent; }
+QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0d6f93, stop:1 #3fd8ff); border-radius: 3px; }
+QScrollBar:vertical { background: transparent; width: 8px; } QScrollBar::handle:vertical { background: #16506a; border-radius: 4px; min-height: 24px; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; }
 """
 
 
@@ -175,15 +185,34 @@ class Window(QMainWindow):
         top.setObjectName("card")
         h = QHBoxLayout(top)
         h.setContentsMargins(22, 18, 22, 18)
-        self.badge = QLabel()
+        self.reactor = hud.Reactor(170)
         self.headline, self.subline = label("Starting", "h1"), label("", "dim")
+        self.greet = label("", "dim")
         t = QVBoxLayout()
+        t.addWidget(self.greet)
         t.addWidget(self.headline)
         t.addWidget(self.subline)
-        h.addWidget(self.badge)
-        h.addSpacing(14)
+        m = QHBoxLayout()
+        self.metrics = {}
+        for key in ("SYSTEMS", "SIGNATURES", "ALERTS 24H", "UPTIME"):
+            box = QVBoxLayout()
+            box.setSpacing(0)
+            val = label("--", "metric")
+            box.addWidget(val)
+            box.addWidget(label(key, "mlabel"))
+            self.metrics[key] = val
+            m.addLayout(box)
+            m.addSpacing(18)
+        m.addStretch()
+        t.addSpacing(8)
+        t.addLayout(m)
+        t.addStretch()
+        h.addWidget(self.reactor)
+        h.addSpacing(18)
         h.addLayout(t, 1)
         v.addWidget(top)
+        self.started = time.time()
+        self._states, self._beat = {}, 0
         self.up_box = QFrame()
         self.up_box.setObjectName("card")
         ub = QHBoxLayout(self.up_box)
@@ -219,9 +248,19 @@ class Window(QMainWindow):
         hb.addWidget(button("Resume", lambda: self.release(False)))
         hb.addWidget(button("End program", lambda: self.release(True)))
         v.addWidget(self.held_box)
-        v.addWidget(label("Recent alerts", "dim"))
+        low = QHBoxLayout()
+        a = QVBoxLayout()
+        a.addWidget(label("LIVE FEED", "mlabel"))
+        self.feed = hud.Feed()
+        a.addWidget(self.feed, 1)
+        b = QVBoxLayout()
+        b.addWidget(label("RECENT ALERTS", "mlabel"))
         self.recent = table(["Level", "When", "What"], 2)
-        v.addWidget(self.recent, 1)
+        b.addWidget(self.recent, 1)
+        low.addLayout(a, 3)
+        low.addLayout(b, 2)
+        v.addLayout(low, 1)
+        self.feed.say("bastion", f"Bastion {core.VERSION} online. Bringing guards up.")
         return w
 
     def page_scan(self):
@@ -370,6 +409,11 @@ class Window(QMainWindow):
         h.addWidget(button("Restore my old DNS", self.dns_off))
         h.addStretch()
         v.addLayout(h)
+        h = QHBoxLayout()
+        h.addWidget(button("Strict mode: block new, rare programs", self.strict_on))
+        h.addWidget(button("Turn strict mode off", self.strict_off))
+        h.addStretch()
+        v.addLayout(h)
         self.h_text = label("", "dim")
         v.addWidget(self.h_text)
         return w
@@ -405,6 +449,15 @@ class Window(QMainWindow):
         h.addWidget(c)
         h.addStretch()
         v.addLayout(h)
+        h3 = QHBoxLayout()
+        h3.addWidget(QLabel("abuse.ch Auth-Key (optional)"))
+        self.key_box = QLineEdit(s["abusech_key"])
+        self.key_box.setEchoMode(QLineEdit.Password)
+        self.key_box.setPlaceholderText("Free from auth.abuse.ch: adds millions of known-malware fingerprints and malware sites")
+        self.key_box.editingFinished.connect(self.set_key)
+        h3.addWidget(self.key_box, 1)
+        h3.addWidget(button("Get a free key", lambda: os.startfile("https://auth.abuse.ch/")))
+        v.addLayout(h3)
         self.intel_text = label("", "dim")
         v.addWidget(self.intel_text)
         v.addWidget(button("Update block lists now", lambda: self.work("intel", self.ctx.intel.update)), 0, Qt.AlignLeft)
@@ -434,12 +487,12 @@ class Window(QMainWindow):
         colour, head, sub = self.summary()
         if colour != self._colour:
             self._colour = colour
-            self.badge.setPixmap(shield(colour, 72))
             self.tray.setIcon(QIcon(shield(colour)))
             self.setWindowIcon(QIcon(shield(colour)))
         self.tray.setToolTip("Bastion: " + head)
         self.headline.setText(head)
         self.subline.setText(sub)
+        self.hud_refresh(colour, head)
         for g in self.ctx.guards:
             ok = g.is_alive() and g.state == "on"
             c = self.cards[g.label]
@@ -465,10 +518,35 @@ class Window(QMainWindow):
         self.ai_refresh()
         i = self.ctx.intel
         when = time.strftime("%b %d %H:%M", time.localtime(i.updated)) if i.updated else "never"
-        self.intel_text.setText(f"Block lists: {len(i.ips):,} botnet servers, {len(i._lo):,} criminal networks, {len(i.vuln_drivers):,} abusable drivers, {self.ctx.engine.rules.count:,} malware signatures. Updated {when}. Known malware files are recognised by Defender."
+        self.intel_text.setText(f"Block lists: {len(i.ips):,} botnet servers, {len(i._lo):,} criminal networks, {len(i.vuln_drivers):,} abusable drivers, {self.ctx.engine.rules.count:,} malware signatures, {len(i.phish) + len(i.phish_live):,} phishing sites" + (f", {getattr(i, 'bazaar', 0):,} MalwareBazaar fingerprints, {len(i.malsites):,} malware sites" if i.auth_key else "") + f". Updated {when}. Known malware files are recognised by Defender."
                                 + ("  Failed: " + ", ".join(i.errors) if i.errors else ""))
 
+    def hud_refresh(self, colour, head):
+        """Reactor, metrics and feed lines: all from real guard state, nothing invented."""
+        gs = self.ctx.guards
+        up = sum(g.is_alive() and g.state == "on" for g in gs)
+        word = {GOOD: "SECURE", WARN: "STANDBY" if head.startswith("Starting") else "CAUTION", BAD: "ALERT"}[colour]
+        self.reactor.set_state(colour, "SCANNING" if self.scanning else word, self.scanning)
+        hr = time.localtime().tm_hour
+        self.greet.setText(("Good morning." if 5 <= hr < 12 else "Good afternoon." if 12 <= hr < 18 else "Good evening.") + f" {up} of {len(gs)} systems online.")
+        secs = int(time.time() - self.started)
+        n24 = self.ctx.log.count_since(86400, HIGH)
+        for k, val in (("SYSTEMS", f"{up}/{len(gs)}"), ("SIGNATURES", f"{self.ctx.engine.rules.count:,}"), ("ALERTS 24H", str(n24)),
+                       ("UPTIME", f"{secs // 3600:02d}:{secs // 60 % 60:02d}")):
+            self.metrics[k].setText(val)
+        self.metrics["ALERTS 24H"].setStyleSheet(f"color: {BAD if n24 else GOOD}")
+        for g in gs:
+            st = g.state if g.is_alive() else "stopped"
+            if self._states.get(g.label) != st:
+                if g.label in self._states or st != "starting":
+                    self.feed.say(g.label, "online" if st == "on" else st, GOOD if st == "on" else WARN)
+                self._states[g.label] = st
+        self._beat += 1
+        if self._beat % 30 == 0:        # about once a minute
+            self.feed.say("status", f"{up}/{len(gs)} guards running. {head}.", colour)
+
     def on_event(self, row):
+        self.feed.say(row[3] or "alert", f"{LEVELS[row[2]]}: {row[4]}", COLOURS[row[2]])
         if row[2] >= self.ctx.settings["notify_level"]:
             self.tray.showMessage("Bastion: " + LEVELS[row[2]], row[4] + "\n" + row[5][:160], QIcon(shield(COLOURS[row[2]])), 9000)
         if row[2] >= MEDIUM:
@@ -671,6 +749,24 @@ class Window(QMainWindow):
                     "A VPN keeps its own settings. Your old settings are saved, and 'Restore my old DNS' puts them back.\n\nWindows will ask for administrator approval."):
             self.h_text.setText("Waiting for Windows")
             self.work("harden", lambda: harden.run_elevated(harden.dns_block_script()))
+
+    def set_key(self):
+        key = self.key_box.text().strip()
+        if key != self.ctx.settings["abusech_key"]:
+            self.ctx.settings["abusech_key"] = key
+            self.ctx.intel.auth_key = key
+            self.work("intel", self.ctx.intel.update)
+
+    def strict_on(self):
+        if self.ask("Turn on strict mode?\n\nDefender will block programs that are new and rare worldwide until its cloud vouches for them, use its strictest cloud "
+                    "blocking, and hold suspicious files for up to 60 seconds while it checks. This stops most brand-new malware before it runs.\n\n"
+                    "It can also block programs you build yourself, small tools and new game mods. If that happens, turn strict mode off here.\n\nWindows will ask for administrator approval."):
+            self.h_text.setText("Waiting for Windows")
+            self.work("harden", lambda: harden.run_elevated(harden.strict_on_script()))
+
+    def strict_off(self):
+        if self.ask("Turn strict mode off and put back the settings you had?"):
+            self.work("harden", lambda: harden.run_elevated(harden.strict_off_script()))
 
     def dns_off(self):
         if self.ask("Put back the DNS settings this PC had before?"):

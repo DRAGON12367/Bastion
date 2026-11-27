@@ -10,7 +10,7 @@ import time
 import winreg
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.4.0"
 NO_WINDOW = 0x08000000
 FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = Path(sys.executable).parent if FROZEN else Path(__file__).resolve().parent.parent
@@ -24,6 +24,7 @@ LEVELS = ["Info", "Low", "Medium", "High", "Critical"]
 DEFAULTS = {
     "auto_respond": True,      # quarantine known malware; suspend an unsigned program caught acting like ransomware
     "intel_updates": True,     # download public block lists (nothing about this PC is sent)
+    "abusech_key": "",         # optional free abuse.ch Auth-Key: millions of known-malware fingerprints and malware sites
     "check_updates": True,     # ask GitHub once a day whether a newer Bastion exists (nothing about you is sent)
     "ai": True,                # let the local model read alerts and learn this PC's habits (nothing leaves the PC)
     "ai_model": "",            # empty: pick one that is installed

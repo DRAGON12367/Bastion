@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.4.0 (Windows + Android)
+A live HUD.
+
+- **Live reactor core.** The Protection page and the phone app now open on an animated core that shows Bastion's real state: cyan when secure, amber for caution, red for an alert, and faster while scanning. It only animates while it is on screen.
+- **Live feed.** A terminal-style feed types out what the guards are doing as it happens: guards coming online, alerts, scans and link checks. Everything shown is real; nothing is made up for effect.
+- **HUD readouts.** Systems online, malware signatures loaded, alerts in the last 24 hours and uptime, at a glance.
+- **New dark cyan theme** across every page on Windows and Android.
+- Includes everything from v1.3.0 (AMSI, memory scan, strict mode, and the fix for phishing alerts and update checks).
+
+## v1.3.0 (Windows)
+Stronger scanning and blocking.
+
+- **Your antivirus judges what Bastion un-hides.** Scripts, web pages and every hidden layer Bastion decodes (Base64, character codes, split or reversed text) are passed to the installed antivirus through Windows' Antimalware Scan Interface (AMSI). Malware that is only visible once decoded is now caught by Microsoft's own engine, not just Bastion's rules.
+- **Memory scan of new unknown programs.** A few seconds after an unsigned program starts from a user folder, Bastion reads its memory with 5,000+ malware signatures, catching packed malware that only reveals itself once running. A match freezes it (you can resume it). Programs with a window, like your own games, are left alone, and nothing is scanned during a full-screen game.
+- **Strict mode (optional).** One button on the Hardening page makes Defender block programs that are new and rare worldwide until its cloud vouches for them, use its strictest cloud blocking, and hold suspicious files up to 60 seconds for a cloud verdict. The strongest "block before it runs" Windows offers; it can also block your own builds, so it is off unless you turn it on, and can be turned off again.
+- **Fixed:** the phishing-site alerts from 1.1.0 and the daily update check from 1.2.0 stopped after their first run (they reused a name the app uses for each guard's status). Both now keep running.
+- **abuse.ch lists (optional).** Add a free abuse.ch Auth-Key in Settings to get MalwareBazaar known-malware fingerprints (collected over time) and URLhaus malware sites. Settings tell you if abuse.ch refuses the key.
+
 ## v1.2.0
 Automatic update alerts on PC and phone.
 

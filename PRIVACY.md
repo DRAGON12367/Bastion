@@ -9,6 +9,8 @@ Bastion has no account and no ads. By default it has no telemetry and keeps noth
 
 It **downloads** public lists, which shows those servers your IP address like any web visit: feodotracker.abuse.ch, spamhaus.org, openphish.com and GitHub (LOLDrivers, YARA Forge, Phishing.Database). The optional Quad9 setting sends your DNS lookups to Quad9 (Swiss non-profit, no IP logging) instead of your internet provider. Switch this off in Settings.
 
+Bastion also hands scripts and web pages it is checking, and what it decodes from them, to the antivirus on this PC through Windows' Antimalware Scan Interface (AMSI). That stays on your PC; what the antivirus does with it is covered by its own privacy settings. If you add an abuse.ch Auth-Key, it is sent to abuse.ch only to download their lists.
+
 When something looks wrong it may ask the antivirus on this PC (Microsoft Defender) to look too. Defender has its own privacy settings.
 
 The optional AI only talks to Ollama on this PC (127.0.0.1).

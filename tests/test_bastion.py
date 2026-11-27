@@ -16,9 +16,15 @@ import pytest
 from bastion import core, engine as E, guards as G, harden, scanner as S, telemetry, updater, web
 
 
+class NoAV:
+    def text(self, *a): return None
+
+
 @pytest.fixture
 def ctx(tmp_path):
-    return G.Context(core.Settings(tmp_path / "s.json"), core.EventLog(tmp_path / "e.db"), E.Intel(tmp_path / "i"), E.Quarantine(tmp_path / "q"))
+    c = G.Context(core.Settings(tmp_path / "s.json"), core.EventLog(tmp_path / "e.db"), E.Intel(tmp_path / "i"), E.Quarantine(tmp_path / "q"))
+    c.engine.amsi = NoAV()          # tests never ask the real antivirus, so a test run can't raise Defender alerts
+    return c
 
 
 def judge(name, data, **k):
@@ -904,7 +910,7 @@ def test_update_guard_checks_daily_and_stays_quiet_offline(ctx, monkeypatch, tmp
         raise updater.requests.ConnectionError("offline")
     monkeypatch.setattr(updater, "check", offline)
     g.step()
-    assert g.status() == "on" and ctx.update is None and g.state.due()        # offline is not an error, and it tries again
+    assert g.status() == "on" and ctx.update is None and g.upd.due()        # offline is not an error, and it tries again
     offer = updater.Update("9.0.0", "p", updater.DOWNLOADS + "v9.0.0/Bastion-Setup-9.0.0.exe", "a" * 64, 10, "")
     calls = []
     monkeypatch.setattr(updater, "check", lambda: calls.append(1) or offer)
@@ -912,7 +918,7 @@ def test_update_guard_checks_daily_and_stays_quiet_offline(ctx, monkeypatch, tmp
     g.step()
     assert ctx.update is offer and len(calls) == 1 and "9.0.0" in ctx.log.latest(1)[0][4]          # once a day only
     ctx.settings["check_updates"] = False
-    g.state.d = {}
+    g.upd.d = {}
     g.step()
     assert len(calls) == 1 and g.status() == "switched off"
 
@@ -928,6 +934,122 @@ def test_update_banner_shows(ctx):
     w.refresh()
     assert w.up_box.isVisibleTo(w) and "9.0.0" in w.up_text.text()
     w.tray.hide()
+
+
+class FakeAV:
+    """Stands in for Defender's AMSI engine so tests never raise real alerts: 'detects' a marker word."""
+    def __init__(self): self.seen = []
+    def text(self, content, name):
+        self.seen.append(content)
+        return "EVIL-MARKER-XYZ" in content
+
+
+def test_antivirus_judges_unhidden_layers(ctx, tmp_path):
+    import base64
+    av = ctx.engine.amsi = FakeAV()
+    plain = tmp_path / "a.ps1"
+    plain.write_bytes(b"Write-Host EVIL-MARKER-XYZ")
+    assert ctx.engine.scan(plain).verdict == E.MALWARE
+    hidden = tmp_path / "b.ps1"
+    hidden.write_bytes(b"$x='" + base64.b64encode("Write-Host EVIL-MARKER-XYZ; Get-Date".encode("utf-16-le")) + b"'")
+    r = ctx.engine.scan(hidden)
+    assert r.verdict == E.MALWARE and any("un-hid" in w for w in r.reasons)          # found only after Bastion decoded it
+    clean = tmp_path / "c.ps1"
+    clean.write_bytes(b"Get-ChildItem | Sort-Object Name")
+    assert ctx.engine.scan(clean).verdict == E.CLEAN
+    page = tmp_path / "d.js"
+    page.write_bytes(b"console.log('EVIL-MARKER-XYZ')")
+    av.seen.clear()
+    assert ctx.engine.scan(page, quiet_js=True).verdict == E.CLEAN and not av.seen    # ordinary web JavaScript is not sent in bulk scans
+    z = tmp_path / "e.zip"
+    z.write_bytes(zipped({"run.ps1": b"EVIL-MARKER-XYZ"}))
+    assert ctx.engine.scan(z).verdict == E.DANGEROUS                                  # an archive is reported, never removed for one file inside
+
+
+def test_antivirus_unavailable_changes_nothing(ctx, tmp_path):
+    class Off:
+        def text(self, *a): return None
+    ctx.engine.amsi = Off()
+    f = tmp_path / "a.ps1"
+    f.write_bytes(b"Write-Host hi")
+    assert ctx.engine.scan(f).verdict == E.CLEAN
+
+
+def test_memory_scan_of_new_unknown_programs(ctx, monkeypatch):
+    calls = []
+    ctx.restrain = lambda p, why, **k: calls.append(why)
+    monkeypatch.setattr(E, "signed", lambda p: False)
+    monkeypatch.setattr(E, "cataloged", lambda p: False)
+    monkeypatch.setattr(G, "playing", lambda: False)
+    monkeypatch.setattr(G.RatGuard, "windows", staticmethod(lambda: set()))
+    monkeypatch.setattr(ctx.engine.rules, "match", lambda target: [("RAT_Family", 85)] if target == 4242 else [])
+    class Proc:
+        pid = 4242
+        def is_running(self): return True
+        def memory_info(self): return type("M", (), {"rss": 50_000_000})()
+    g = G.ProcessGuard(ctx)
+    g.setup()
+    exe = os.path.join(os.environ["LOCALAPPDATA"], "x", "updater.exe")
+    g.memory_check(Proc(), exe)
+    assert calls and "RAT_Family" in calls[0] and ctx.log.latest(1, core.CRITICAL)
+    calls.clear()
+    monkeypatch.setattr(G.RatGuard, "windows", staticmethod(lambda: {4242}))
+    g.memory_check(Proc(), os.path.join(os.environ["USERPROFILE"], "Games", "mygame.exe"))
+    assert not calls                                                                   # your own windowed programs and games are left alone
+    monkeypatch.setattr(G.RatGuard, "windows", staticmethod(lambda: set()))
+    monkeypatch.setattr(G, "playing", lambda: True)
+    g.memory_check(Proc(), exe)
+    assert not calls                                                                   # never during a full-screen game
+    monkeypatch.setattr(G, "playing", lambda: False)
+    monkeypatch.setattr(E, "signed", lambda p: True)
+    g.memory_check(Proc(), exe)
+    assert not calls and not g.scanning
+
+
+def test_strict_mode_scripts(tmp_path):
+    for script in (harden.strict_on_script(), harden.strict_off_script()):
+        f = tmp_path / "s.ps1"
+        f.write_text(script, "utf8")
+        code, out = core.powershell(f"$e=$null;[void][Management.Automation.Language.Parser]::ParseInput([IO.File]::ReadAllText({core.quoted(f)}),[ref]$null,[ref]$e);'errors '+$e.Count")
+        assert "errors 0" in out, out
+    assert harden.PREVALENCE in harden.strict_on_script() and "HighPlus" in harden.strict_on_script()
+    assert "[int]$b.cloud" in harden.strict_off_script()                                # a tampered backup can only ever put numbers back
+
+
+def test_abusech_lists_with_a_key(ctx, monkeypatch):
+    i = ctx.intel
+    i.auth_key = "abc123 ; rm -rf <x>"
+    seen = []
+    def fake(url, limit, headers=None):
+        seen.append((url, headers))
+        if "bazaar" in url:
+            return ("# MalwareBazaar\n" + "b" * 64 + "\n").encode()
+        if "urlhaus" in url:
+            return b"# URLhaus\n127.0.0.1\tmalware-site.example\n0.0.0.0 other.example\n"
+        return b"# x\n1.2.3.4\n"
+    monkeypatch.setattr(E, "fetch", fake)
+    i.update()
+    key_urls = [u for u, h in seen if "abuse.ch/export" in u or "urlhaus" in u]
+    assert key_urls and all("auth-key=abc123rmrfx" in u for u in key_urls)             # the key can't smuggle anything into the address
+    assert "b" * 64 in i.hashes and i.bad_site("malware-site.example") and i.bad_site("other.example")
+    i.auth_key = "wrong"
+    monkeypatch.setattr(E, "fetch", lambda url, limit, headers=None: b"<html>401 Unauthorized</html>" if "abuse.ch" in url else b"# x\n1.2.3.4\n")
+    i.update()
+    assert "MalwareBazaar" in i.errors and "URLhaus" in i.errors and "b" * 64 in i.hashes      # a refusal is reported; earlier fingerprints are kept
+
+
+def test_every_guard_survives_its_own_status_being_set(ctx, monkeypatch):
+    # The app's loop sets guard.state to "on" after each step; a guard must not keep its own data under that name.
+    monkeypatch.setattr(web, "new_visits", lambda visits: [])
+    monkeypatch.setattr(updater, "check", lambda: None)
+    for cls in (G.WebGuard, G.UpdateGuard, G.ScanGuard, G.AIGuard, G.RatGuard, G.ProcessGuard, G.NetworkGuard, G.DriveGuard):
+        g = cls(ctx)
+        g.setup()
+        for _ in range(2):
+            g.state = g.status()
+            if cls not in (G.ScanGuard,):
+                g.step()
+        assert isinstance(g.state, str), cls.__name__
 
 
 def test_bait_alarm(ctx, tmp_path):

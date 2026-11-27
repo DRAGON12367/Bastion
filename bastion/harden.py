@@ -14,6 +14,8 @@ BACKUP = DATA / "defender_before.json"
 RESULT = DATA / "harden_result.txt"
 REG_BACKUP = DATA / "windows_before.json"
 DNS_BACKUP = DATA / "dns_before.json"
+STRICT_BACKUP = DATA / "strict_before.json"
+PREVALENCE = "01443614-cd74-433a-9ec2-2ecdbfb8e8f7"
 QUAD9 = ["9.9.9.9", "149.112.112.112", "2620:fe::fe", "2620:fe::9"]
 
 # Microsoft's attack-surface-reduction rules. Left out on purpose: "block programs that are rare or new", which would stop your own games and tools.
@@ -145,6 +147,26 @@ def undo_script():
     return _steps(steps + [f"Remove-Item {quoted(BACKUP)}"])
 
 
+def strict_on_script():
+    """Strict mode: Defender blocks programs that are new and rare worldwide until its cloud vouches for them, uses its strictest cloud
+    blocking, and holds a suspicious file up to 60 seconds for a cloud verdict. Strongest blocking Windows offers; may block your own builds."""
+    return _steps([
+        f"if (-not (Test-Path {quoted(STRICT_BACKUP)})) {{ $p=Get-MpPreference; $i=[array]::IndexOf(@($p.AttackSurfaceReductionRules_Ids|%{{\"$_\".ToLower()}}), '{PREVALENCE}'); "
+        f"@{{cloud=[int]$p.CloudBlockLevel; timeout=[int]$p.CloudExtendedTimeout; had=[int]($i -ge 0); act=$(if ($i -ge 0) {{ [int]@($p.AttackSurfaceReductionRules_Actions)[$i] }} else {{ 0 }})}} | ConvertTo-Json | Set-Content -Encoding utf8 {quoted(STRICT_BACKUP)} }}",
+        f"Add-MpPreference -AttackSurfaceReductionRules_Ids {PREVALENCE} -AttackSurfaceReductionRules_Actions Enabled",
+        "Set-MpPreference -CloudBlockLevel HighPlus -CloudExtendedTimeout 50",
+    ])
+
+
+def strict_off_script():
+    return _steps([
+        f"if (Test-Path {quoted(STRICT_BACKUP)}) {{ $b = Get-Content -Raw {quoted(STRICT_BACKUP)} | ConvertFrom-Json; "
+        "Set-MpPreference -CloudBlockLevel ([int]$b.cloud) -CloudExtendedTimeout ([int]$b.timeout); "
+        f"if ([int]$b.had -eq 1) {{ Add-MpPreference -AttackSurfaceReductionRules_Ids {PREVALENCE} -AttackSurfaceReductionRules_Actions ([int]$b.act) }} else {{ Remove-MpPreference -AttackSurfaceReductionRules_Ids {PREVALENCE} }}; "
+        f"Remove-Item {quoted(STRICT_BACKUP)} }} else {{ Remove-MpPreference -AttackSurfaceReductionRules_Ids {PREVALENCE} }}",
+    ])
+
+
 def quad9_on():
     """True when a network connection on this PC uses Quad9."""
     base = r"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
@@ -222,6 +244,7 @@ def status(d):
         ("Protected folders", d["cfa"] in (1, 2), {0: "Off", 1: "Blocking", 2: "Logging only, so your games and builds keep working"}.get(d["cfa"], "Custom")),
         *[(layer, all(reg_read(k, n) == v for l, k, n, v in REG if l == layer), note) for layer, note in REG_NOTES.items()],
         ("Windows tools cut off from the web", firewall_on(), ", ".join(NO_NET)),
+        ("Strict mode", bool(d.get("strict")), "Blocks programs that are new and rare worldwide. Optional: it can block your own builds"),
         ("Dangerous-site blocking (Quad9)", quad9_on(), "Blocks known malware and phishing sites in every browser and app. Use the button below"),
         ("Secure Boot", reg_read(r"SYSTEM\CurrentControlSet\Control\SecureBoot\State", "UEFISecureBootEnabled") == 1, "Stops rootkits that load before Windows"),
         ("Memory integrity", bool(d.get("hvci")), "Stops rootkits inside Windows. By hand: turn on virtualization (SVM or VT-x) in the BIOS, then Windows Security > Core isolation"),

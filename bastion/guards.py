@@ -359,7 +359,7 @@ class ProcessGuard(Guard):
     label, every = "Programs", 0.25
 
     def setup(self):
-        self.known, self.sides = set(psutil.pids()), set()
+        self.known, self.sides, self.later, self.scanning = set(psutil.pids()), set(), [], False
 
     def step(self):
         now = set(psutil.pids())
@@ -396,6 +396,35 @@ class ProcessGuard(Guard):
                 self.sideload(exe)
             if user_writable(exe) and (self._temp(low) or "\\downloads\\" in low):
                 self.ctx.examine(exe, self.label, running=p)
+            if user_writable(exe) and len(self.later) < 200:
+                self.later.append((time.time() + 8, p, exe))
+        self.memory_due()
+
+    def memory_due(self):
+        """Packed malware only shows itself once running: a few seconds after an unknown program starts, its memory is read for signatures."""
+        if self.scanning or not self.later or self.later[0][0] > time.time():
+            return
+        _, p, exe = self.later.pop(0)
+        self.scanning = True
+        threading.Thread(target=self.memory_check, args=(p, exe), daemon=True, name="memory scan").start()
+
+    def memory_check(self, p, exe):
+        try:
+            if not p.is_running() or p.memory_info().rss > 1_500_000_000 or playing() or self.ctx.settings.allowed(exe):
+                return
+            if E.signed(exe) or E.cataloged(exe):
+                return
+            if p.pid in RatGuard.windows() and not E.Engine.landed(exe):
+                return                  # an ordinary program with a window, like your own games: left alone
+            hits = [n for n, s in self.ctx.engine.rules.match(p.pid) if s >= 70]
+            if hits:
+                why = "a malware signature found in its memory (" + ", ".join(hits[:3]) + ")"
+                self.ctx.log.add(CRITICAL, self.label, f"Malware found running: {os.path.basename(exe)}", f"{exe}\n{why}", exe)
+                self.ctx.restrain(p, why)
+        except (psutil.Error, OSError):
+            pass
+        finally:
+            self.scanning = False
 
     def sideload(self, exe):
         """A signed program in a user folder with an unsigned stand-in for a Windows library beside it."""
@@ -767,9 +796,10 @@ class DefenderGuard(Guard):
     SCRIPT = ("$av=@(Get-CimInstance -Namespace root/SecurityCenter2 AntiVirusProduct -ErrorAction SilentlyContinue | ?{(($_.productState -shr 12) -band 15) -eq 1 -and $_.displayName -notmatch 'Defender'} | %{$_.displayName}) -join ', ';"
               "$ErrorActionPreference='SilentlyContinue'; $s=Get-MpComputerStatus; $p=Get-MpPreference; @{other=\"$av\";rt=[bool]$s.RealTimeProtectionEnabled;bm=[bool]$s.BehaviorMonitorEnabled;tp=[bool]$s.IsTamperProtected;"
               "age=$s.AntivirusSignatureAge;full=$s.FullScanAge;quick=$s.QuickScanAge;np=[int]$p.EnableNetworkProtection;cfa=[int]$p.EnableControlledFolderAccess;"
-              "cloud=[int]$p.CloudBlockLevel;pua=[int]$p.PUAProtection;hvci=((Get-CimInstance -Namespace root/Microsoft/Windows/DeviceGuard Win32_DeviceGuard -ErrorAction SilentlyContinue).SecurityServicesRunning -contains 2);asr=@($p.AttackSurfaceReductionRules_Ids|?{$_}).Count}|ConvertTo-Json -Compress")
+              "cloud=[int]$p.CloudBlockLevel;pua=[int]$p.PUAProtection;hvci=((Get-CimInstance -Namespace root/Microsoft/Windows/DeviceGuard Win32_DeviceGuard -ErrorAction SilentlyContinue).SecurityServicesRunning -contains 2);strict=(@($p.AttackSurfaceReductionRules_Ids|%{\"$_\".ToLower()}) -contains '01443614-cd74-433a-9ec2-2ecdbfb8e8f7');asr=@($p.AttackSurfaceReductionRules_Ids|?{$_}).Count}|ConvertTo-Json -Compress")
 
     def step(self):
+        self.ctx.intel.auth_key = self.ctx.settings["abusech_key"]
         code, out = powershell(self.SCRIPT)
         m = re.search(r"\{.*\}", out, re.S)
         if code != 0 or not m:
@@ -1016,7 +1046,7 @@ class WebGuard(Guard):
     label, every = "Web", 30.0
 
     def setup(self):
-        self.state, self.told = {}, set()
+        self.visits, self.told = {}, set()        # not 'state': every guard uses that for its on/off status
 
     def status(self):
         return "on" if self.ctx.settings["watch_browsing"] else "switched off"
@@ -1024,7 +1054,7 @@ class WebGuard(Guard):
     def step(self):
         if not self.ctx.settings["watch_browsing"]:
             return
-        for browser, host in web.new_visits(self.state):
+        for browser, host in web.new_visits(self.visits):
             if host in self.told or self.ctx.settings.allowed(host):
                 continue
             why = next((w for w in map(self.ctx.intel.bad_site, web.candidates(host)) if w), None)
@@ -1039,19 +1069,19 @@ class UpdateGuard(Guard):
     label, every = "Updates", 3600.0
 
     def setup(self):
-        self.state = updater.State()
+        self.upd = updater.State()
 
     def status(self):
         return "on" if self.ctx.settings["check_updates"] else "switched off"
 
     def step(self):
-        if not self.ctx.settings["check_updates"] or not self.state.due():
+        if not self.ctx.settings["check_updates"] or not self.upd.due():
             return
         try:
             u = updater.check()
         except (requests.RequestException, ValueError):
             return                      # offline: try again next hour, without calling the guard broken
-        self.state.mark(u.version if u else "")
+        self.upd.mark(u.version if u else "")
         self.ctx.update = u
         if u:
             self.ctx.log.add(INFO, self.label, f"Bastion {u.version} is available", "Open Bastion and choose Update now.", u.version)

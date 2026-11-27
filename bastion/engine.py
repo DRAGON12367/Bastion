@@ -26,7 +26,7 @@ try:
 except ImportError:
     yara = None
 
-from . import detect, web
+from . import amsi, detect, web
 from .core import DATA, ROOT, folders, run
 
 CLEAN, SUSPICIOUS, DANGEROUS, MALWARE = range(4)
@@ -137,8 +137,8 @@ def cataloged(path):
     return False
 
 
-def fetch(url, limit):
-    with requests.get(url, timeout=45, headers={"User-Agent": "blocklist-client/1.0"}, stream=True) as r:
+def fetch(url, limit, headers=None):
+    with requests.get(url, timeout=45, headers={"User-Agent": "blocklist-client/1.0", **(headers or {})}, stream=True) as r:
         r.raise_for_status()
         out, end = bytearray(), time.time() + 180
         for block in r.iter_content(1 << 16):
@@ -429,6 +429,7 @@ SEVERE = ("(hidden)", "hidden program", "under encoding", "weaken antivirus", "r
 class Engine:
     def __init__(self, settings, intel, rules=None):
         self.settings, self.intel, self.rules = settings, intel, rules or Rules(intel.dir)
+        self.amsi = amsi.Amsi()
 
     def scan(self, path, thorough=False, quiet_js=False):
         """Signed programs are trusted once their hash is checked (thorough=True looks inside them too). quiet_js leaves web-page and Node
@@ -461,6 +462,8 @@ class Engine:
                         if ext in SCRIPT_EXT | PY_EXT and not net and res.verdict in (SUSPICIOUS, DANGEROUS) and not self.landed(p) and not any(m in w for w in res.reasons for m in SEVERE):
                             res.score, res.verdict = min(res.score, 55), CLEAN      # an ordinary tool kept on this PC, hiding nothing
                     self.signatures(res, data, trusted)
+                    if not is_pe and (ext in SCRIPT_EXT | PY_EXT | WEB_EXT or ext in LURE_EXT) and not (quiet_js and ext == ".js" and not WSH.search(data[:2_000_000])):
+                        self.ask_av(res, data, p.name, trusted)
                     if ext in ARCHIVES or data[:2] == b"PK" or ext in DISCS:
                         self.inside(res, data, ext, quiet_js)
             if res.sha256 in self.intel.vuln_drivers:
@@ -495,17 +498,31 @@ class Engine:
                     r.add(80, f"a program pretending to be {e}")
                 elif not pe and not (quiet_js and e == ".js" and not WSH.search(d)):
                     inspect(name, d, r)
+                    if e in SCRIPT_EXT | PY_EXT | WEB_EXT:
+                        self.ask_av(r, d, Path(name).name, False)
                 if e in RISKY or pe:
                     self.signatures(r, d, False)
                 if depth > 1 and (e in ARCHIVES or d[:2] == b"PK"):
                     self.inside(r, d, e, quiet_js, depth - 1)
                 if r.score >= 60 or r.verdict > CLEAN:
                     res.add(min(95, r.score), f"inside it, {Path(name).name[-50:]}: " + "; ".join(r.reasons[:3]))
-                    res.verdict = max(res.verdict, r.verdict, DANGEROUS if r.score >= 90 else SUSPICIOUS)
+                    res.verdict = max(res.verdict, min(r.verdict, DANGEROUS), DANGEROUS if r.score >= 90 else SUSPICIOUS)     # never removed for one file inside
                     if res.score > 300:
                         return
         except detect.SOFT:
             pass
+
+    def ask_av(self, res, data, name, trusted):
+        """Lets the installed antivirus judge a script as written and every layer Bastion un-hid. Its verdict is the antivirus's own."""
+        if res.verdict == MALWARE:
+            return
+        text = data[:2_000_000]
+        text = text.decode("utf-16", "replace") if text[:2] in (b"\xff\xfe", b"\xfe\xff") else text.decode("utf8", "replace")
+        for i, layer in enumerate(detect.layers(text)):
+            if self.amsi.text(layer, name):
+                res.add(100, "Microsoft's antivirus engine recognises this as malware" + (" once Bastion un-hid it" if i else ""))
+                res.verdict = DANGEROUS if trusted else MALWARE
+                return
 
     def signatures(self, res, data, trusted):
         """Public malware signatures. They can be wrong, so a match is reported for a decision and never acted on by itself."""
@@ -661,7 +678,7 @@ class Intel:
         self.dir = Path(folder or DATA / "intel")
         self.dir.mkdir(parents=True, exist_ok=True)
         self.hashes, self.vuln_drivers, self.ips, self._lo, self._hi = set(), set(), set(), [], []
-        self.phish_live, self.phish = set(), web.SiteList()
+        self.phish_live, self.phish, self.malsites, self.auth_key = set(), web.SiteList(), web.SiteList(), ""
         self.updated, self.errors = 0.0, {}
         self._lock = threading.Lock()
         self.load()
@@ -672,7 +689,9 @@ class Intel:
             return f.read_text("utf8", "replace") if f.exists() else ""
         def hashes(n):
             return set(re.findall(r"(?m)^([0-9a-f]{64})\s*$", text(n).lower())) - {self.EMPTY}
-        self.hashes = hashes("hashes") | hashes("baddrivers")
+        self.hashes = hashes("hashes") | hashes("baddrivers") | hashes("bazaar")
+        self.bazaar = len(hashes("bazaar"))
+        self.malsites = web.SiteList(m for m in re.findall(r"(?m)^\s*(?:0\.0\.0\.0|127\.0\.0\.1)\s+(\S+)", text("urlhaus")) if "." in m)
         self.vuln_drivers = hashes("vulndrivers")
         self.ips = set(re.findall(r"(?m)^(\d+\.\d+\.\d+\.\d+)\s*$", text("feodo")))
         self.phish_live = set(web.parse_urls(text("openphish")))
@@ -707,8 +726,37 @@ class Intel:
                     os.replace(tmp, self.dir / (name + ".txt"))
                 except (requests.RequestException, ValueError, OSError) as e:
                     self.errors[name] = str(e)[:160]
+            if self.auth_key:
+                self._abusech()
             self.load()
         return not self.errors
+
+    def _abusech(self):
+        """MalwareBazaar (known-malware fingerprints of the last 48 hours, collected here over time) and URLhaus (malware sites),
+        with the owner's free abuse.ch Auth-Key. A refusal is reported in Settings and changes nothing else."""
+        key = re.sub(r"[^A-Za-z0-9]", "", self.auth_key)[:100]
+        head = {"Auth-Key": key}
+        try:
+            text = fetch(f"https://bazaar.abuse.ch/export/txt/sha256/recent/?auth-key={key}", 30_000_000, head).decode("utf8", "replace")
+            new = set(re.findall(r"(?m)^([0-9a-f]{64})\s*$", text.lower()))
+            if not new:
+                raise ValueError("abuse.ch refused the key or changed its download (no fingerprints came back)")
+            f = self.dir / "bazaar.txt"
+            old = set(re.findall(r"(?m)^([0-9a-f]{64})$", f.read_text("utf8"))) if f.exists() else set()
+            tmp = self.dir / "bazaar.tmp"
+            tmp.write_text("\n".join(sorted(old | new)) + "\n", "utf8")
+            os.replace(tmp, f)
+        except (requests.RequestException, ValueError, OSError) as e:
+            self.errors["MalwareBazaar"] = str(e)[:160]
+        try:
+            text = fetch(f"https://urlhaus.abuse.ch/downloads/hostfile/?auth-key={key}", 30_000_000, head).decode("utf8", "replace")
+            if not re.search(r"(?m)^\s*(0\.0\.0\.0|127\.0\.0\.1)\s+\S+\.\S+", text):
+                raise ValueError("abuse.ch refused the key or changed its download (no sites came back)")
+            tmp = self.dir / "urlhaus.tmp"
+            tmp.write_text(text, "utf8")
+            os.replace(tmp, self.dir / "urlhaus.txt")
+        except (requests.RequestException, ValueError, OSError) as e:
+            self.errors["URLhaus"] = str(e)[:160]
 
     def bad_site(self, host):
         """Which phishing list a site name is on, or None."""
@@ -717,6 +765,8 @@ class Intel:
             return "live phishing list (OpenPhish)"
         if host in self.phish:
             return "phishing site list (Phishing.Database)"
+        if host in self.malsites:
+            return "malware site list (URLhaus)"
         return None
 
     def bad_ip(self, ip):
