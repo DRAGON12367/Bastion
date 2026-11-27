@@ -38,22 +38,39 @@ public class MainActivity extends Activity {
     private SharedPreferences prefs;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private TextView tele;
-    /** Real readings, every 2 seconds while the screen is open: memory in use and battery. */
+    private TextView chip;
+    private Hud.Radar radar;
+    private Hud.Graph gMem, gNet, gBat;
+    private LinearLayout modules;
+    private final TextView[] metric = new TextView[4];
+    private long lastBytes = -1, lastAt;
+
+    /** Real readings, every second while the screen is open: memory in use, network traffic and battery. */
     private final Runnable telemetry = new Runnable() {
         @Override
         public void run() {
+            tele.setText(new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(new java.util.Date()) + "\n"
+                    + new java.text.SimpleDateFormat("EEE dd MMM", java.util.Locale.US).format(new java.util.Date()).toUpperCase(java.util.Locale.US));
             android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
-            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
-            String mem = "--";
             if (am != null) {
+                android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
                 am.getMemoryInfo(mi);
-                if (mi.totalMem > 0) mem = (100 - mi.availMem * 100 / mi.totalMem) + "%";
+                if (mi.totalMem > 0) {
+                    float used = 1f - (float) mi.availMem / mi.totalMem;
+                    gMem.push(used, Math.round(used * 100) + "%");
+                }
             }
+            long bytes = android.net.TrafficStats.getTotalRxBytes() + android.net.TrafficStats.getTotalTxBytes(), now = android.os.SystemClock.elapsedRealtime();
+            if (bytes >= 0 && lastBytes >= 0 && now > lastAt) {
+                double rate = (bytes - lastBytes) * 1000.0 / (now - lastAt);
+                gNet.push((float) (Math.log10(1 + rate / 1024) / 5), rate >= 1048576 ? String.format(java.util.Locale.US, "%.2f MB/s", rate / 1048576) : Math.round(rate / 1024) + " KB/s");
+            }
+            lastBytes = bytes;
+            lastAt = now;
             Intent bat = registerReceiver(null, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
             int lvl = bat == null ? -1 : bat.getIntExtra("level", -1), scale = bat == null ? 100 : bat.getIntExtra("scale", 100);
-            String batt = lvl < 0 || scale <= 0 ? "" : "   BATT " + (lvl * 100 / scale) + "%";
-            tele.setText(new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(new java.util.Date()) + "   MEM " + mem + batt + "   ANDROID " + Build.VERSION.RELEASE);
-            ui.postDelayed(this, 2000);
+            if (lvl >= 0 && scale > 0) gBat.push(lvl / (float) scale, (lvl * 100 / scale) + "%");
+            ui.postDelayed(this, 1000);
         }
     };
 
@@ -91,29 +108,65 @@ public class MainActivity extends Activity {
         root.setPadding(dp(side), dp(28), dp(side), dp(28));
         scroll.addView(root);
 
+        String build = "";
+        try {
+            build = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception ignored) {
+        }
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.setPadding(dp(4), 0, dp(4), dp(8));
+        LinearLayout brand = column();
+        TextView title = text("B A S T I O N", 22, TEXT, true);
+        title.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        brand.addView(title);
+        TextView tag = text("AUTONOMOUS DEFENSE GRID // BUILD " + build, 9, 0xFF5F8AA0, true);
+        tag.setLetterSpacing(0.15f);
+        brand.addView(tag);
+        head.addView(brand, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        LinearLayout right = column();
+        right.setGravity(Gravity.END);
+        chip = text("\u25CF STANDBY", 11, WARN, true);
+        chip.setPadding(dp(10), dp(4), dp(10), dp(4));
+        right.addView(chip);
+        tele = text("", 11, 0xFF9FDCF0, false);
+        tele.setTypeface(Typeface.MONOSPACE);
+        tele.setGravity(Gravity.END);
+        tele.setPadding(0, dp(4), 0, 0);
+        right.addView(tele);
+        head.addView(right);
+        root.addView(head);
+        setChip(WARN, "STANDBY");
+
         LinearLayout top = card();
-        TextView title = text("B A S T I O N", 24, TEXT, true);
+        top.addView(label("CORE STATUS"));
         headline = text("Ready to check this phone", 20, TEXT, true);
         subline = text("Looks at installed apps and phone settings. Nothing about you is sent anywhere.", 14, DIM, false);
         scanButton = button("Check this phone", true, v -> scan());
+        LinearLayout core = new LinearLayout(this);
         reactor = new Reactor(this);
-        top.addView(reactor, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(200)));
-        title.setLetterSpacing(0.12f);
-        title.setGravity(Gravity.CENTER);
-        top.addView(title);
-        TextView tag = text("AUTONOMOUS DEFENSE GRID", 10, 0xFF5F8AA0, true);
-        tag.setLetterSpacing(0.2f);
-        tag.setGravity(Gravity.CENTER);
-        top.addView(tag);
-        tele = text("", 11, 0xFF9FDCF0, false);
-        tele.setTypeface(Typeface.MONOSPACE);
-        tele.setGravity(Gravity.CENTER);
-        tele.setPadding(0, dp(6), 0, dp(2));
-        top.addView(tele);
+        radar = new Hud.Radar(this);
+        core.addView(reactor, new LinearLayout.LayoutParams(0, dp(180), 1));
+        core.addView(radar, new LinearLayout.LayoutParams(0, dp(180), 1));
+        top.addView(core);
+        LinearLayout row = new LinearLayout(this);
+        row.setPadding(0, dp(10), 0, 0);
+        String[] names = {"APPS", "FLAGGED", "SETTINGS", "PHISH DB"};
+        for (int i = 0; i < 4; i++) {
+            LinearLayout m = column();
+            metric[i] = text("--", 22, GOOD, false);
+            metric[i].setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+            m.addView(metric[i]);
+            TextView l = text(names[i], 9, 0xFF5F8AA0, true);
+            l.setLetterSpacing(0.15f);
+            m.addView(l);
+            row.addView(m, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        }
         top.addView(space(6));
         top.addView(headline);
         top.addView(space(4));
         top.addView(subline);
+        top.addView(row);
         top.addView(space(14));
         top.addView(scanButton);
         feed = text("", 12, 0xFFC9E7F2, false);
@@ -129,6 +182,26 @@ public class MainActivity extends Activity {
         top.addView(feed);
         root.addView(top);
         say("Bastion online. Checks run on this phone only.");
+
+        LinearLayout tel = card();
+        tel.addView(label("SYSTEM TELEMETRY"));
+        LinearLayout graphs = new LinearLayout(this);
+        gMem = new Hud.Graph(this, "MEMORY", 0xFF7CF0C8);
+        gNet = new Hud.Graph(this, "NETWORK", 0xFFB48CFF);
+        gBat = new Hud.Graph(this, "BATTERY", GOOD);
+        for (Hud.Graph g : new Hud.Graph[]{gMem, gNet, gBat}) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(64), 1);
+            lp.setMargins(dp(4), dp(6), dp(4), 0);
+            graphs.addView(g, lp);
+        }
+        tel.addView(graphs);
+        root.addView(tel);
+
+        LinearLayout mods = card();
+        mods.addView(label("DEFENSE MODULES"));
+        modules = column();
+        mods.addView(modules);
+        root.addView(mods);
 
         LinearLayout link = card();
         link.addView(text("Check a link", 17, TEXT, true));
@@ -241,6 +314,36 @@ public class MainActivity extends Activity {
         }
         for (Scanner.Check c : r.checks) if (!c.ok) weak++;
         if (top() != null) top().setAccent(known > 0 ? BAD : check > 0 || weak > 0 ? WARN : GOOD);
+        int state = known > 0 ? BAD : check > 0 || weak > 0 ? WARN : GOOD;
+        setChip(state, known > 0 ? "ALERT" : check > 0 ? "CAUTION" : "SECURE");
+        java.util.List<float[]> blips = new java.util.ArrayList<>();
+        for (Scanner.AppResult a : r.apps) {
+            if (a.verdict.level != Judge.KNOWN && a.verdict.level != Judge.CHECK) continue;
+            float ang = ((a.facts.pkg.hashCode() % 360) + 360) % 360;
+            blips.add(new float[]{ang, a.verdict.level == Judge.KNOWN ? 0.3f : 0.55f + 0.35f * ((a.facts.pkg.length() % 10) / 10f), a.verdict.level == Judge.KNOWN ? BAD : WARN});
+        }
+        radar.setBlips(blips.toArray(new float[0][]));
+        int checks = r.checks.size();
+        String[] vals = {String.valueOf(r.appsLooked), String.valueOf(known + check), (checks - weak) + "/" + checks, phish == null ? "--" : String.format(java.util.Locale.US, "%,d", phish.size())};
+        for (int i = 0; i < 4; i++) metric[i].setText(vals[i]);
+        metric[1].setTextColor(known > 0 ? BAD : check > 0 ? WARN : GOOD);
+        modules.removeAllViews();
+        java.util.List<String[]> tiles = new java.util.ArrayList<>();
+        tiles.add(new String[]{"APP SCANNER", known > 0 ? "ALERT" : check > 0 ? "CAUTION" : "CLEAR", String.valueOf(state)});
+        tiles.add(new String[]{"24/7 GUARD", "ONLINE", String.valueOf(GOOD)});
+        tiles.add(new String[]{"PHISH SHIELD", phish == null || phish.size() == 0 ? "LOADING" : "ONLINE", String.valueOf(phish == null || phish.size() == 0 ? WARN : GOOD)});
+        tiles.add(new String[]{"STALKERWARE DB", "ONLINE", String.valueOf(GOOD)});
+        for (Scanner.Check c : r.checks) tiles.add(new String[]{c.title.toUpperCase(java.util.Locale.US), c.ok ? "OK" : "CHECK", String.valueOf(c.ok ? GOOD : WARN)});
+        int per = getResources().getConfiguration().screenWidthDp >= 600 ? 4 : 2;
+        LinearLayout line = null;
+        for (int i = 0; i < tiles.size(); i++) {
+            if (i % per == 0) {
+                line = new LinearLayout(this);
+                modules.addView(line);
+            }
+            line.addView(tile(tiles.get(i)[0], tiles.get(i)[1], Integer.parseInt(tiles.get(i)[2])));
+        }
+        for (int i = tiles.size() % per; i > 0 && i < per; i++) line.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
         reactor.setState(known > 0 ? BAD : check > 0 || weak > 0 ? WARN : GOOD, known > 0 ? "ALERT" : check > 0 ? "CAUTION" : "SECURE", false);
         say(r.appsLooked + " apps checked: " + known + " known bad, " + check + " to look at, " + weak + " weak setting" + (weak == 1 ? "." : "s."));
         if (known > 0) {
@@ -368,8 +471,48 @@ public class MainActivity extends Activity {
         return t;
     }
 
+    private void setChip(int colour, String word) {
+        chip.setText("\u25CF " + word);
+        chip.setTextColor(colour);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(0xCC040E16);
+        g.setStroke(dp(1), colour);
+        g.setCornerRadius(dp(3));
+        chip.setBackground(g);
+    }
+
+    private TextView label(String s) {
+        TextView t = text(s, 10, GOOD, true);
+        t.setLetterSpacing(0.2f);
+        t.setPadding(dp(30), 0, 0, dp(6));
+        return t;
+    }
+
+    private View tile(String name, String status, int colour) {
+        LinearLayout t = column();
+        t.setPadding(dp(10), dp(6), dp(8), dp(6));
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(0x8C0A2232);
+        g.setStroke(dp(1), 0xFF14465E);
+        t.setBackground(new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{g, new android.graphics.drawable.ColorDrawable(colour)}));
+        ((android.graphics.drawable.LayerDrawable) t.getBackground()).setLayerGravity(1, Gravity.START | Gravity.FILL_VERTICAL);
+        ((android.graphics.drawable.LayerDrawable) t.getBackground()).setLayerWidth(1, dp(2));
+        TextView n = text(name, 11, TEXT, true);
+        n.setSingleLine(true);
+        n.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.addView(n);
+        TextView st = text("\u25CF " + status, 10, colour, false);
+        st.setTypeface(Typeface.MONOSPACE);
+        t.addView(st);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1);
+        lp.setMargins(dp(3), dp(3), dp(3), dp(3));
+        t.setLayoutParams(lp);
+        return t;
+    }
+
     private Hud.Panel top() {
-        return reactor.getParent() instanceof View && ((View) reactor.getParent()).getBackground() instanceof Hud.Panel ? (Hud.Panel) ((View) reactor.getParent()).getBackground() : null;
+        View card = (View) reactor.getParent().getParent();
+        return card.getBackground() instanceof Hud.Panel ? (Hud.Panel) card.getBackground() : null;
     }
 
     private TextView section(String s) {

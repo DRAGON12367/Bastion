@@ -2,7 +2,6 @@ dist/
 build/
 .buildenv/
 .testtmp/
-.bastion_tests/
 __pycache__/
 .pytest_cache/
 *.spec

@@ -1,7 +1,9 @@
 # Changelog
 
-## v1.6.0 (Windows)
-Stronger defenses.
+## v1.6.0 (Windows + Android)
+Stronger defenses, and the full HUD on Android.
+
+- **Android: the full HUD.** A header with build, live clock and status chip; the reactor beside a threat radar (each blip is an app the check flagged); readouts for apps checked, flagged, settings and phishing database; live memory, network and battery graphs; and defense-module tiles for every protection and phone setting. Tablets and TVs show four tiles per row.
 
 - **New Firewall guard.** Alerts when Windows Firewall is switched off (directly or through a policy), when a new rule opens the firewall for an unsigned program in a user folder (and scans that program), and when a rule lets the network in on a port for every program.
 - **Malware check-in detection.** Unknown unsigned programs that contact the same server on a steady timer, the way remote-control malware waits for orders, are reported and scanned. Hidden ones are rated high.
