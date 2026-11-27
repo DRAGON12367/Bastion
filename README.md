@@ -1,6 +1,33 @@
 # Bastion
 
-A free guard for Windows 10 and 11 PCs (64-bit). It works **beside** your antivirus and does not replace it.
+A free guard for Windows 10 and 11 PCs (64-bit) and Android phones. It works **beside** your antivirus and does not replace it.
+
+<p align="center">
+  <a href="https://github.com/DRAGON12367/Bastion/releases/latest/download/Bastion-Setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download-Windows-0d4a63?style=for-the-badge&logo=windows&logoColor=white" height="56"></a>
+  &nbsp;
+  <a href="https://github.com/DRAGON12367/Bastion/releases/latest/download/Bastion-Android.apk"><img alt="Download for Android" src="https://img.shields.io/badge/Download-Android-0d4a63?style=for-the-badge&logo=android&logoColor=white" height="56"></a>
+</p>
+<p align="center">
+  <a href="https://github.com/DRAGON12367/Bastion/releases/latest"><img alt="Latest version" src="https://img.shields.io/github/v/release/DRAGON12367/Bastion?label=latest&color=3fd8ff"></a>
+  <img alt="Free" src="https://img.shields.io/badge/price-free-3fd8ff">
+  <img alt="License MIT" src="https://img.shields.io/badge/license-MIT-3fd8ff">
+</p>
+
+## Install in 3 steps
+
+**Windows**
+1. Click **Download - Windows** above.
+2. Open `Bastion-Setup.exe`. If Windows shows *"Windows protected your PC"*, click **More info**, then **Run anyway** (the installer isn't code-signed yet; see [SECURITY.md](SECURITY.md)).
+3. Click **Install**. Bastion starts by itself and shows a shield in the system tray, next to the clock.
+
+**Android** (8 or newer)
+1. On your phone, tap **Download - Android** above.
+2. Open `Bastion-Android.apk`. When asked, allow your browser to *install unknown apps*, then tap **Install**.
+3. Open Bastion. It checks your phone straight away and again every 30 minutes.
+
+Already have Bastion? It tells you when a new version is out, and updates itself on Windows.
+
+Want to check the files first? Every [release](https://github.com/DRAGON12367/Bastion/releases/latest) lists each file's SHA-256 checksum.
 
 ## What it does
 - **Watches all the time:** new files, programs being started, start-up entries, drivers, network connections, USB drives, camera and microphone use, and ransomware behaviour.
@@ -21,15 +48,13 @@ No program catches everything, and this one has limits you should know:
 
 Keep Windows updated, keep a real antivirus on, and keep backups.
 
-## Install
-Download the latest `Bastion-Setup-x.y.z.exe` from the [Releases page](https://github.com/DRAGON12367/Bastion/releases). Until signing is live (see below), SmartScreen may warn — compare the installer's SHA-256 with the one published next to it before running.
-
+## Checking the download
 **[VirusTotal scan of v1.0.0](https://www.virustotal.com/gui/file/8e27244b60c6e50984f0615e1ba06ae623418aa486f37b80517ede8acd3f234e)** — 3 of ~70 engines flag it with generic/heuristic detections, which is normal for an unsigned installer built with PyInstaller. See SECURITY.md.
 
 ## Android (beta)
 Bastion for Android checks the apps on your phone for spyware and stalkerware, and checks your phone's security settings. Works on Android 8 and newer (Pixel, Samsung and others).
 
-1. On your phone, download `Bastion-Android-x.y.z.apk` from the [Releases page](https://github.com/DRAGON12367/Bastion/releases).
+1. On your phone, tap **Download - Android** at the top of this page.
 2. Open it. Android asks you to allow your browser or file app to "install unknown apps": allow it, then tap **Install**.
 3. Android may warn that the developer is unrecognised. That's expected for apps from outside the Play Store.
 
