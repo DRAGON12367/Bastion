@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.6.0 (Windows)
+Stronger defenses.
+
+- **New Firewall guard.** Alerts when Windows Firewall is switched off (directly or through a policy), when a new rule opens the firewall for an unsigned program in a user folder (and scans that program), and when a rule lets the network in on a port for every program.
+- **Malware check-in detection.** Unknown unsigned programs that contact the same server on a steady timer, the way remote-control malware waits for orders, are reported and scanned. Hidden ones are rated high.
+- **DNS hijack alerts.** Warns when this PC's DNS servers are changed to something other than well-known services (Quad9, Cloudflare, Google, OpenDNS), a trick used to send you to fake banking and login pages.
+- **19 new attack-command rules:** web installs through msiexec and the finger tool (fake-CAPTCHA attacks), forced Safe Mode and file-permission grabs (ransomware), killing security software, firewall off through PowerShell, firewall holes and port forwarding through netsh, start-up and program-hijack registry edits, reverse SSH tunnels, setup-file and helper-tool tricks, free-space wiping, and downloads into hidden folders.
+
+## v1.5.0 (Windows + Android)
+A new HUD interface on every device.
+
+- **Windows:** a full heads-up display. Animated hex-grid backdrop with a scanning beam, glass panels with glowing corner brackets, a header with a live clock and status chip, and glyph navigation.
+- **Threat radar:** every alert from the last 24 hours is a blip. Newer alerts sit nearer the centre, and the colour shows how serious it is.
+- **Live telemetry:** processor, memory and network graphs for the last minute, read from this PC every second.
+- **Defense modules:** all 13 guards as compact status tiles.
+- **Android phones, tablets and TVs:** the same hex backdrop and bracket panels, and a live line with the time, memory in use, battery and Android version.
+- Everything on screen is real data; the animations stop while the window is hidden.
+
 ## v1.4.1 (Android)
 Runs on many more devices.
 

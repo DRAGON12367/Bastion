@@ -58,6 +58,25 @@ COMMANDS = [(n, re.compile(rx, re.I), lvl, why) for n, rx, lvl, why in [
     ("curl.exe", r"discord(app)?\.com/api/webhooks|api\.telegram\.org/bot", HIGH, "sending data to a chat service"),
     ("powershell.exe", r"-w(indowstyle)?\s+h\w*\s.*-e(nc|ncodedcommand)?\s+[a-z0-9+/=]{60,}|-e(nc|ncodedcommand)?\s+[a-z0-9+/=]{60,}.*-w(indowstyle)?\s+h", HIGH, "running a hidden, encoded command"),
     ("wevtutil.exe", r"\bcl\b|clear-log", HIGH, "wiping the Windows event log"),
+    # v1.6: newer tricks seen in fake-CAPTCHA (ClickFix) campaigns, ransomware and RAT set-ups
+    ("msiexec.exe", r"/(i|package)\S*\s+\"?https?://|https?://\S+\.msi", HIGH, "installing a package straight from the web (a fake-CAPTCHA trick)"),
+    ("finger.exe", r"\S+@\S+", HIGH, "fetching commands with the old finger tool (a fake-CAPTCHA trick)"),
+    ("bcdedit.exe", r"safeboot", HIGH, "forcing the next start into Safe Mode (ransomware does this to dodge antivirus)"),
+    ("taskkill.exe", r"(msmpeng|mssense|nissrv|securityhealth|smartscreen|bastion)", HIGH, "trying to kill security software"),
+    ("sc.exe", r"(stop|config|delete)\s+(sense|wdnissvc|wdboot|wdfilter|bfe)\b", CRITICAL, "switching off Windows security"),
+    ("powershell.exe", r"set-netfirewallprofile.*-enabled\s+(\$?false|0)", HIGH, "switching off the firewall"),
+    ("pwsh.exe", r"set-netfirewallprofile.*-enabled\s+(\$?false|0)", HIGH, "switching off the firewall"),
+    ("netsh.exe", r"firewall\s+(add|set)\s+(rule|allowedprogram).*(\\appdata\\|\\temp\\|\\users\\public\\|\\programdata\\)", HIGH, "opening the firewall for a program in a user folder"),
+    ("netsh.exe", r"interface\s+portproxy\s+add", HIGH, "forwarding network ports (used to tunnel attackers in)"),
+    ("reg.exe", r"add.*\\(currentversion\\run(once)?|winlogon)\b.*(\\appdata\\|\\temp\\|\\users\\public\\|powershell|mshta|wscript)", HIGH, "making something start with Windows from a user folder"),
+    ("reg.exe", r"add.*\\image file execution options\\.*debugger", HIGH, "hijacking a program so something else runs instead"),
+    ("ssh.exe", r"\s-R\s*\S+", MEDIUM, "opening a reverse tunnel into this PC"),
+    ("icacls.exe", r"/grant\s+(everyone|\*s-1-1-0):\(?(oi\)\(ci\)\(?)?f", MEDIUM, "giving everyone full control of files (ransomware prepares this)"),
+    ("cmstp.exe", r"/s\b.*\.inf|/au\b", HIGH, "loading a setup file to slip past security"),
+    ("forfiles.exe", r"/c\s.*(powershell|cmd|mshta|https?:)", MEDIUM, "running a hidden command through a Windows helper"),
+    ("pcalua.exe", r"-a\s", MEDIUM, "starting a program through a Windows helper to hide where it came from"),
+    ("cipher.exe", r"/w:", MEDIUM, "wiping free disk space (can erase traces after an attack)"),
+    ("curl.exe", r"https?://\S+.*-o\s*\"?\S*(\\temp\\|\\appdata\\|\\users\\public\\|%temp%|%appdata%)\S*\.(exe|dll|scr|msi|hta|js|vbs|ps1|bat)", MEDIUM, "downloading a program into a hidden folder"),
 ]]
 
 
@@ -1008,6 +1027,191 @@ class RootkitGuard(Guard):
             self.tell(CRITICAL if user_writable(path) else HIGH, f"Unsigned {what}", f"{path}\n{state}", path)
 
 
+FW = "SYSTEM\\CurrentControlSet\\Services\\SharedAccess\\Parameters\\FirewallPolicy"
+FW_POLICY = "SOFTWARE\\Policies\\Microsoft\\WindowsFirewall"
+PROFILES = {"DomainProfile": "work", "StandardProfile": "private", "PublicProfile": "public"}
+IFACES = "SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters\\Interfaces"
+SAFE_DNS = {"9.9.9.9", "149.112.112.112", "2620:fe::fe", "2620:fe::9", "1.1.1.1", "1.0.0.1", "1.1.1.2", "1.0.0.2", "8.8.8.8", "8.8.4.4", "208.67.222.222", "208.67.220.220"}
+
+
+def parse_rule(text):
+    """A Windows firewall rule string ('v2.30|Action=Allow|Dir=In|App=C:\\x.exe|...') as a dict with lower-case keys."""
+    out = {}
+    for part in str(text).split("|"):
+        k, sep, v = part.partition("=")
+        if sep:
+            out.setdefault(k.strip().lower(), v)
+    return out
+
+
+def beacon(times, need=6):
+    """The check-in interval in seconds if these connection times tick like a timer (as malware calling home does), else None."""
+    if len(times) < need:
+        return None
+    gaps = [b - a for a, b in zip(times, times[1:])][-(need - 1):]
+    mean = sum(gaps) / len(gaps)
+    if not 15 <= mean <= 900:
+        return None
+    spread = (sum((x - mean) ** 2 for x in gaps) / len(gaps)) ** 0.5
+    return mean if spread / mean < 0.15 else None
+
+
+class FirewallGuard(Guard):
+    """Watches the Windows firewall (switched off, new holes for programs in user folders), DNS hijacking,
+    and unknown programs that call home on a regular timer like malware checking in with its controller."""
+    label, every = "Firewall", 3.0
+
+    def setup(self):
+        self.file = DATA / "firewall_baseline.json"
+        try:
+            self.base = json.loads(self.file.read_text("utf8"))
+        except (OSError, ValueError):
+            self.base = {}
+        self.told, self.sign, self.exes = set(), {}, {}
+        self.conns, self.seen = {}, set()
+        self.slow = 0.0
+        self.me = os.getpid()
+
+    @staticmethod
+    def _read(path, value, hive=winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, path) as k:
+                return winreg.QueryValueEx(k, value)[0]
+        except OSError:
+            return None
+
+    def profiles_off(self):
+        off = []
+        for key, name in PROFILES.items():
+            if self._read(f"{FW}\\{key}", "EnableFirewall") == 0 or self._read(f"{FW_POLICY}\\{key}", "EnableFirewall") == 0:
+                off.append(name)
+        return off
+
+    def rules(self):
+        out = {}
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, FW + "\\FirewallRules") as k:
+                for i in range(winreg.QueryInfoKey(k)[1]):
+                    name, data, _ = winreg.EnumValue(k, i)
+                    out[name] = hashlib.sha1(str(data).encode("utf8", "replace")).hexdigest()[:16]
+                    if name not in self.base.get("rules", {}):
+                        out[name] = (out[name], str(data))
+        except OSError:
+            pass
+        return out
+
+    def dns(self):
+        out = {}
+        try:
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, IFACES) as t:
+                for i in range(winreg.QueryInfoKey(t)[0]):
+                    sub = winreg.EnumKey(t, i)
+                    v = self._read(f"{IFACES}\\{sub}", "NameServer")
+                    if v:
+                        out[sub] = v
+        except OSError:
+            pass
+        return out
+
+    def _save(self):
+        try:
+            self.file.write_text(json.dumps(self.base), "utf8")
+        except OSError:
+            pass
+
+    def slow_checks(self):
+        other = (self.ctx.defender or {}).get("other")
+        off = self.profiles_off()
+        was = set(self.base.get("off", []))
+        for name in off:
+            if name not in was:
+                fresh = "rules" in self.base
+                level = LOW if other else HIGH if fresh else MEDIUM
+                self.ctx.log.add(level, self.label, f"Windows Firewall is off for {name} networks",
+                                 (f"{other} may be handling the firewall instead." if other else "Malware often switches the firewall off. Turn it back on in Windows Security > Firewall & network protection.")
+                                 + " Bastion's Hardening page can also turn it on.", f"firewall-{name}")
+        self.base["off"] = off
+
+        rules = self.rules()
+        known = self.base.get("rules")
+        if known is not None:
+            for name, val in rules.items():
+                if name in known or not isinstance(val, tuple):
+                    continue
+                r = parse_rule(val[1])
+                if r.get("action", "").lower() != "allow" or r.get("active", "true").lower() != "true":
+                    continue
+                app = os.path.expandvars(r.get("app", ""))
+                label = r.get("name", name)[:80]
+                if app and user_writable(app) and not self.ctx.settings.allowed(app):
+                    unsigned = not self.signed(app)
+                    self.ctx.log.add(HIGH if unsigned else LOW, self.label, f"New firewall opening for {'an unsigned' if unsigned else 'a'} program in a user folder",
+                                     f"{app}\nRule: {label}\nDirection: {r.get('dir', '?')}. Malware does this so attackers can reach it. If you just installed this program, trust it.", app)
+                    if unsigned:
+                        self.ctx.examine(app, self.label, deep=True)
+                elif r.get("dir", "").lower() == "in" and not app and r.get("lport") and r.get("lport") not in ("*", "Any"):
+                    self.ctx.log.add(MEDIUM, self.label, f"New firewall rule lets the network in on port {r.get('lport')}",
+                                     f"Rule: {label}\nAny program can now receive connections on this port.", f"fwport-{name}")
+        self.base["rules"] = {n: (v[0] if isinstance(v, tuple) else v) for n, v in rules.items()}
+
+        servers = self.dns()
+        known = self.base.get("dns")
+        if known is not None:
+            for nic, v in servers.items():
+                ips = {x.strip() for x in v.replace(" ", ",").split(",") if x.strip()}
+                if known.get(nic) != v and ips and not ips <= SAFE_DNS:
+                    self.ctx.log.add(MEDIUM, self.label, "This PC's DNS servers were changed",
+                                     f"Now: {v}\nDNS decides which real server a site name leads to; malware changes it to send you to fake banking and login pages. If you or your VPN changed it, ignore this.", f"dns-{nic}-{v}")
+        self.base["dns"] = servers
+        self._save()
+
+    def check_ins(self):
+        now = time.time()
+        live = set()
+        for c in psutil.net_connections("inet"):
+            if not (c.raddr and c.pid and c.pid != self.me and public_ip(c.raddr.ip)):
+                continue
+            key = (c.pid, c.laddr.port, c.raddr.ip)
+            live.add(key)
+            if key in self.seen:
+                continue
+            self.seen.add(key)
+            exe = self.exes.get(c.pid)
+            if exe is None:
+                try:
+                    exe = psutil.Process(c.pid).exe() or ""
+                except psutil.Error:
+                    exe = ""
+                self.exes[c.pid] = exe = exe if exe and user_writable(exe) and not self.ctx.settings.allowed(exe) and not self.signed(exe) else ""
+            if exe:
+                self.conns.setdefault((exe, c.raddr.ip), deque(maxlen=12)).append(now)
+        self.seen &= live
+        if len(self.exes) > 2000:
+            self.exes.clear()
+        shown = None
+        for (exe, ip), times in list(self.conns.items()):
+            if now - times[-1] > 1800:
+                del self.conns[(exe, ip)]
+                continue
+            every = beacon(list(times))
+            if every and self.once(("beacon", exe, ip)):
+                shown = self.windows() if shown is None else shown
+                pids = {p for p, e in self.exes.items() if e == exe}
+                hidden = not (pids & shown)
+                self.ctx.log.add(HIGH if hidden else MEDIUM, self.label, f"{os.path.basename(exe)} checks in with a server every {every:.0f} seconds",
+                                 f"{exe}\nServer: {ip}\nAn unsigned {'hidden ' if hidden else ''}program calling the same server on a steady timer is how remote-control malware waits for orders. If you know this program, trust it.", exe)
+                self.ctx.examine(exe, self.label, deep=True)
+
+    def step(self):
+        if time.time() - self.slow >= 30:
+            self.slow = time.time()
+            self.slow_checks()
+        self.check_ins()
+
+    signed = RatGuard.signed
+    windows = staticmethod(RatGuard.windows)
+
+
 class ScanGuard(Guard):
     """Keeps the malware signatures fresh, and runs Bastion's own full scan once a day while nobody is using the PC."""
     label, every = "Scanner", 60.0
@@ -1136,7 +1340,7 @@ class Context:
         self.held = {}       # pid -> (psutil.Process, why)
 
     def start(self):
-        self.guards = [self.ransom, FileGuard(self), ProcessGuard(self), StartupGuard(self), NetworkGuard(self), DriveGuard(self), DefenderGuard(self), RatGuard(self), RootkitGuard(self), AIGuard(self), ScanGuard(self), WebGuard(self), UpdateGuard(self)]
+        self.guards = [self.ransom, FileGuard(self), ProcessGuard(self), StartupGuard(self), NetworkGuard(self), DriveGuard(self), DefenderGuard(self), RatGuard(self), RootkitGuard(self), FirewallGuard(self), AIGuard(self), ScanGuard(self), WebGuard(self), UpdateGuard(self)]
         self.log.listeners.append(self.ai.offer)
         for g in self.guards:
             g.start()

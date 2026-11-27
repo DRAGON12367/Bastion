@@ -10,7 +10,7 @@ import time
 import winreg
 from pathlib import Path
 
-VERSION = "1.4.0"
+VERSION = "1.6.0"
 NO_WINDOW = 0x08000000
 FROZEN = bool(getattr(sys, "frozen", False))
 ROOT = Path(sys.executable).parent if FROZEN else Path(__file__).resolve().parent.parent

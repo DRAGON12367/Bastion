@@ -37,6 +37,37 @@ public class MainActivity extends Activity {
     private Button scanButton;
     private SharedPreferences prefs;
     private final Handler ui = new Handler(Looper.getMainLooper());
+    private TextView tele;
+    /** Real readings, every 2 seconds while the screen is open: memory in use and battery. */
+    private final Runnable telemetry = new Runnable() {
+        @Override
+        public void run() {
+            android.app.ActivityManager am = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            android.app.ActivityManager.MemoryInfo mi = new android.app.ActivityManager.MemoryInfo();
+            String mem = "--";
+            if (am != null) {
+                am.getMemoryInfo(mi);
+                if (mi.totalMem > 0) mem = (100 - mi.availMem * 100 / mi.totalMem) + "%";
+            }
+            Intent bat = registerReceiver(null, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            int lvl = bat == null ? -1 : bat.getIntExtra("level", -1), scale = bat == null ? 100 : bat.getIntExtra("scale", 100);
+            String batt = lvl < 0 || scale <= 0 ? "" : "   BATT " + (lvl * 100 / scale) + "%";
+            tele.setText(new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(new java.util.Date()) + "   MEM " + mem + batt + "   ANDROID " + Build.VERSION.RELEASE);
+            ui.postDelayed(this, 2000);
+        }
+    };
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        ui.post(telemetry);
+    }
+
+    @Override
+    protected void onPause() {
+        ui.removeCallbacks(telemetry);
+        super.onPause();
+    }
     private boolean scanning;
     private LinearLayout linkResult;
     private EditText linkBox;
@@ -52,7 +83,7 @@ public class MainActivity extends Activity {
         getWindow().setNavigationBarColor(BG);
 
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFF0B1C2A, BG, BG}));
+        scroll.setBackground(new Hud.Backdrop(getResources().getDisplayMetrics().density));
         scroll.setFillViewport(true);
         LinearLayout root = column();
         // Tablets, Chromebooks and TVs: keep a readable column in the middle instead of stretching across the screen.
@@ -61,7 +92,7 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         LinearLayout top = card();
-        TextView title = text("Bastion", 26, TEXT, true);
+        TextView title = text("B A S T I O N", 24, TEXT, true);
         headline = text("Ready to check this phone", 20, TEXT, true);
         subline = text("Looks at installed apps and phone settings. Nothing about you is sent anywhere.", 14, DIM, false);
         scanButton = button("Check this phone", true, v -> scan());
@@ -70,6 +101,15 @@ public class MainActivity extends Activity {
         title.setLetterSpacing(0.12f);
         title.setGravity(Gravity.CENTER);
         top.addView(title);
+        TextView tag = text("AUTONOMOUS DEFENSE GRID", 10, 0xFF5F8AA0, true);
+        tag.setLetterSpacing(0.2f);
+        tag.setGravity(Gravity.CENTER);
+        top.addView(tag);
+        tele = text("", 11, 0xFF9FDCF0, false);
+        tele.setTypeface(Typeface.MONOSPACE);
+        tele.setGravity(Gravity.CENTER);
+        tele.setPadding(0, dp(6), 0, dp(2));
+        top.addView(tele);
         top.addView(space(6));
         top.addView(headline);
         top.addView(space(4));
@@ -200,6 +240,7 @@ public class MainActivity extends Activity {
             else if (a.verdict.level == Judge.CHECK) check++;
         }
         for (Scanner.Check c : r.checks) if (!c.ok) weak++;
+        if (top() != null) top().setAccent(known > 0 ? BAD : check > 0 || weak > 0 ? WARN : GOOD);
         reactor.setState(known > 0 ? BAD : check > 0 || weak > 0 ? WARN : GOOD, known > 0 ? "ALERT" : check > 0 ? "CAUTION" : "SECURE", false);
         say(r.appsLooked + " apps checked: " + known + " known bad, " + check + " to look at, " + weak + " weak setting" + (weak == 1 ? "." : "s."));
         if (known > 0) {
@@ -309,11 +350,7 @@ public class MainActivity extends Activity {
 
     private LinearLayout card() {
         LinearLayout l = column();
-        GradientDrawable g = new GradientDrawable();
-        g.setColor(CARD);
-        g.setCornerRadius(dp(6));
-        g.setStroke(dp(1), LINE);
-        l.setBackground(g);
+        l.setBackground(new Hud.Panel(getResources().getDisplayMetrics().density, GOOD));
         l.setPadding(dp(16), dp(14), dp(16), dp(14));
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(10);
@@ -331,8 +368,12 @@ public class MainActivity extends Activity {
         return t;
     }
 
+    private Hud.Panel top() {
+        return reactor.getParent() instanceof View && ((View) reactor.getParent()).getBackground() instanceof Hud.Panel ? (Hud.Panel) ((View) reactor.getParent()).getBackground() : null;
+    }
+
     private TextView section(String s) {
-        TextView t = text(s, 13, DIM, true);
+        TextView t = text("// " + s, 13, GOOD, true);
         t.setAllCaps(true);
         t.setLetterSpacing(0.08f);
         t.setPadding(dp(4), dp(22), 0, dp(2));

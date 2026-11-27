@@ -10,6 +10,11 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComb
                                QLabel, QLineEdit, QListWidget, QMainWindow, QMenu, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QStackedWidget, QSystemTrayIcon,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
+import math
+import zlib
+
+import psutil
+
 from . import ai, core, engine as E, harden, hud, scanner, telemetry, updater, web
 from .core import HIGH, LEVELS, MEDIUM
 
@@ -19,18 +24,26 @@ STYLE = """
 * { font-family: 'Segoe UI'; font-size: 13px; color: #d8f3ff; }
 QMainWindow, QMessageBox { background: qradialgradient(cx:0.5, cy:0.3, radius:1.1, stop:0 #0b1c2a, stop:1 #04080d); }
 QStackedWidget, QStackedWidget > QWidget { background: transparent; }
-QListWidget { background: #050a10; border: none; border-right: 1px solid #12384c; padding: 14px 6px; outline: 0; }
+QListWidget { background: rgba(2, 8, 14, 0.55); border: none; border-right: 1px solid #12384c; padding: 14px 6px; outline: 0; font-family: 'Bahnschrift'; font-size: 13px; }
 QListWidget::item { padding: 11px 14px; border-radius: 4px; margin: 2px 4px; color: #7fb4cc; }
-QListWidget::item:selected { background: #0e2a3a; color: #3fd8ff; border-left: 3px solid #3fd8ff; }
+QListWidget::item:selected { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(63,216,255,0.28), stop:1 rgba(63,216,255,0)); color: #e9fbff; border-left: 3px solid #3fd8ff; }
 QListWidget::item:hover { background: #0a1d29; }
 QFrame#card { background: rgba(10, 30, 44, 0.78); border: 1px solid #16506a; border-radius: 6px; }
-QLabel#h1 { font-size: 22px; font-weight: 600; color: #e9fbff; } QLabel#dim { color: #7f9bb0; }
-QLabel#metric { font-family: 'Cascadia Mono', Consolas; font-size: 20px; color: #3fd8ff; }
-QLabel#mlabel { font-size: 10px; color: #5f8aa0; font-weight: 600; }
-QPushButton { background: #0b2231; border: 1px solid #1c5a77; border-radius: 4px; padding: 8px 16px; color: #bfeeff; }
+QLabel#h1 { font-family: 'Bahnschrift'; font-size: 22px; font-weight: 600; color: #e9fbff; }
+QLabel#brand { font-family: 'Bahnschrift'; font-size: 24px; font-weight: 700; color: #e9fbff; }
+QLabel#greet { font-family: 'Bahnschrift'; font-size: 13px; color: #3fd8ff; }
+QLabel#clock { font-family: 'Cascadia Mono', Consolas; font-size: 13px; color: #9fdcf0; qproperty-alignment: AlignRight; }
+QLabel#chip { font-family: 'Bahnschrift'; font-size: 12px; font-weight: 600; padding: 5px 12px; border-radius: 3px; background: rgba(4, 14, 22, 0.8); }
+QWidget#tile { background: rgba(10, 34, 50, 0.55); border: 1px solid #14465e; border-left: 2px solid #3fd8ff; }
+QWidget#tile:hover { background: rgba(20, 60, 84, 0.7); }
+QLabel#tilename { font-family: 'Bahnschrift'; font-size: 11px; font-weight: 600; color: #e9fbff; }
+QLabel#tilestate { font-family: 'Cascadia Mono', Consolas; font-size: 10px; } QLabel#dim { color: #7f9bb0; }
+QLabel#metric { font-family: 'Bahnschrift'; font-size: 26px; font-weight: 300; color: #3fd8ff; }
+QLabel#mlabel { font-family: 'Bahnschrift'; font-size: 10px; color: #5f8aa0; font-weight: 600; }
+QPushButton { font-family: 'Bahnschrift'; background: #0b2231; border: 1px solid #1c5a77; border-radius: 4px; padding: 8px 16px; color: #bfeeff; }
 QPushButton:hover { background: #10324a; border-color: #3fd8ff; } QPushButton:disabled { color: #3f5868; border-color: #173445; }
 QPushButton#main { background: #0d4a63; border-color: #3fd8ff; font-weight: 600; color: #e9fbff; } QPushButton#main:hover { background: #136182; }
-QTableWidget { background: rgba(6, 18, 28, 0.85); border: 1px solid #16506a; border-radius: 6px; gridline-color: #0f2a3a; }
+QTableWidget { background: rgba(4, 14, 22, 0.6); border: 1px solid #16506a; border-radius: 6px; gridline-color: #0f2a3a; }
 QTableWidget::item { padding: 5px; } QTableWidget::item:selected { background: #10324a; }
 QHeaderView::section { background: #08192a; border: none; border-bottom: 1px solid #16506a; padding: 7px; color: #5f8aa0; }
 QPlainTextEdit, QLineEdit { background: rgba(4, 12, 20, 0.9); border: 1px solid #16506a; border-radius: 6px; padding: 8px; }
@@ -126,25 +139,55 @@ class Window(QMainWindow):
         self.scanning = False
         self.quitting = False
         self.setWindowTitle("Bastion")
-        self.resize(1060, 680)
+        self.resize(1280, 820)
         self.setStyleSheet(STYLE)
+        self.started = time.time()
+        self._states, self._beat = {}, 0
 
         self.nav = QListWidget()
-        self.nav.setFixedWidth(170)
+        self.nav.setFixedWidth(190)
         self.pages = QStackedWidget()
-        for name, make in (("Protection", self.page_home), ("Scan", self.page_scan), ("Alerts", self.page_alerts), ("AI", self.page_ai),
-                           ("Quarantine", self.page_quarantine), ("Hardening", self.page_harden), ("Settings", self.page_settings)):
-            self.nav.addItem(name)
+        for glyph, name, make in (("\u25c8", "Protection", self.page_home), ("\u25ce", "Scan", self.page_scan), ("\u25b2", "Alerts", self.page_alerts), ("\u2726", "AI", self.page_ai),
+                                  ("\u25a3", "Quarantine", self.page_quarantine), ("\u2b22", "Hardening", self.page_harden), ("\u2699", "Settings", self.page_settings)):
+            self.nav.addItem(f"{glyph}   {name.upper()}")
             self.pages.addWidget(make())
         self.nav.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.nav.setCurrentRow(0)
-        body = QWidget()
-        h = QHBoxLayout(body)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(22, 14, 22, 6)
+        brand = QVBoxLayout()
+        brand.setSpacing(0)
+        brand.addWidget(label("B A S T I O N", "brand"))
+        sub = label(f"AUTONOMOUS DEFENSE GRID  //  BUILD {core.VERSION}", "mlabel")
+        sub.setWordWrap(False)
+        brand.addWidget(sub)
+        head.addLayout(brand)
+        head.addStretch()
+        self.chip = label("", "chip")
+        self.clock = label("", "clock")
+        head.addWidget(self.chip)
+        head.addSpacing(18)
+        head.addWidget(self.clock)
+
+        body = hud.Backdrop()
+        outer = QVBoxLayout(body)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        outer.addLayout(head)
+        h = QHBoxLayout()
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(0)
         h.addWidget(self.nav)
         h.addWidget(self.pages)
+        outer.addLayout(h, 1)
         self.setCentralWidget(body)
+
+        self._net = None
+        psutil.cpu_percent(None)
+        self.fast = QTimer(self)
+        self.fast.timeout.connect(self.tick)
+        self.fast.start(1000)
 
         self.tray = QSystemTrayIcon(QIcon(shield(GOOD)), self)
         m = QMenu()
@@ -169,9 +212,9 @@ class Window(QMainWindow):
     def page(self, title, sub=""):
         w = QWidget()
         v = QVBoxLayout(w)
-        v.setContentsMargins(26, 22, 26, 22)
+        v.setContentsMargins(22, 14, 26, 22)
         v.setSpacing(12)
-        v.addWidget(label(title, "h1"))
+        v.addWidget(label("// " + title.upper(), "h1"))
         if sub:
             v.addWidget(label(sub, "dim"))
         return w, v
@@ -179,15 +222,15 @@ class Window(QMainWindow):
     def page_home(self):
         w = QWidget()
         v = QVBoxLayout(w)
-        v.setContentsMargins(26, 22, 26, 22)
-        v.setSpacing(14)
-        top = QFrame()
-        top.setObjectName("card")
+        v.setContentsMargins(22, 10, 26, 18)
+        v.setSpacing(12)
+
+        top = hud.Panel("core status")
         h = QHBoxLayout(top)
-        h.setContentsMargins(22, 18, 22, 18)
-        self.reactor = hud.Reactor(170)
+        h.setContentsMargins(20, 22, 20, 16)
+        self.reactor = hud.Reactor(180)
         self.headline, self.subline = label("Starting", "h1"), label("", "dim")
-        self.greet = label("", "dim")
+        self.greet = label("", "greet")
         t = QVBoxLayout()
         t.addWidget(self.greet)
         t.addWidget(self.headline)
@@ -202,20 +245,21 @@ class Window(QMainWindow):
             box.addWidget(label(key, "mlabel"))
             self.metrics[key] = val
             m.addLayout(box)
-            m.addSpacing(18)
+            m.addSpacing(22)
         m.addStretch()
-        t.addSpacing(8)
+        t.addSpacing(10)
         t.addLayout(m)
         t.addStretch()
+        self.radar = hud.Radar(180)
         h.addWidget(self.reactor)
         h.addSpacing(18)
         h.addLayout(t, 1)
+        h.addWidget(self.radar)
         v.addWidget(top)
-        self.started = time.time()
-        self._states, self._beat = {}, 0
-        self.up_box = QFrame()
-        self.up_box.setObjectName("card")
+
+        self.up_box = hud.Panel("update", WARN)
         ub = QHBoxLayout(self.up_box)
+        ub.setContentsMargins(18, 20, 18, 12)
         self.up_text = label()
         self.up_text.setTextFormat(Qt.PlainText)
         ub.addWidget(self.up_text, 1)
@@ -225,40 +269,62 @@ class Window(QMainWindow):
         self.up_box.setVisible(False)
         self._told_update = ""
         v.addWidget(self.up_box)
-        self.cards, grid = {}, QGridLayout()
-        grid.setSpacing(10)
-        for i, (n, what) in enumerate((("Files", "New downloads and files"), ("Programs", "What starts and how"), ("Ransomware", "Bait files and mass changes"),
-                                       ("Startup", "New auto-start entries"), ("Network", "Known bad servers"), ("USB drives", "Checked when plugged in"), ("Defender", "Windows' own engine"),
-                                       ("RAT", "Remote control and spying"), ("Rootkit", "Drivers and hidden programs"), ("AI", "Explains and learns"), ("Scanner", "Daily scan and signatures"), ("Web", "Phishing sites you open"), ("Updates", "Checks once a day"))):
-            c = QFrame()
-            c.setObjectName("card")
-            cv = QVBoxLayout(c)
-            st = label("starting")
-            cv.addWidget(label(f"<b>{n}</b>"))
-            cv.addWidget(label(what, "dim"))
-            cv.addWidget(st)
-            self.cards[n] = st
-            grid.addWidget(c, i // 6, i % 6)
-        v.addLayout(grid)
-        self.held_box = QFrame()
-        self.held_box.setObjectName("card")
+
+        self.held_box = hud.Panel("containment", BAD)
         hb = QHBoxLayout(self.held_box)
+        hb.setContentsMargins(18, 20, 18, 12)
         self.held_text = label()
         hb.addWidget(self.held_text, 1)
         hb.addWidget(button("Resume", lambda: self.release(False)))
         hb.addWidget(button("End program", lambda: self.release(True)))
         v.addWidget(self.held_box)
+
+        tele = hud.Panel("system telemetry")
+        th = QHBoxLayout(tele)
+        th.setContentsMargins(18, 22, 18, 10)
+        th.setSpacing(22)
+        self.g_cpu, self.g_mem, self.g_net = hud.Graph("PROCESSOR"), hud.Graph("MEMORY", "#7cf0c8"), hud.Graph("NETWORK", "#b48cff")
+        for g in (self.g_cpu, self.g_mem, self.g_net):
+            th.addWidget(g, 1)
+        v.addWidget(tele)
+
+        mods = hud.Panel("defense modules")
+        grid = QGridLayout(mods)
+        grid.setContentsMargins(16, 24, 16, 12)
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(6)
+        self.cards, self.tiles = {}, {}
+        for i, (n, what) in enumerate((("Files", "New downloads and files"), ("Programs", "What starts and how"), ("Ransomware", "Bait files and mass changes"),
+                                       ("Startup", "New auto-start entries"), ("Network", "Known bad servers"), ("USB drives", "Checked when plugged in"), ("Defender", "Windows' own engine"),
+                                       ("RAT", "Remote control and spying"), ("Rootkit", "Drivers and hidden programs"), ("Firewall", "Firewall, DNS and malware check-ins"), ("AI", "Explains and learns"), ("Scanner", "Daily scan and signatures"), ("Web", "Phishing sites you open"), ("Updates", "Checks once a day"))):
+            tile = QWidget()
+            tile.setObjectName("tile")
+            tile.setAttribute(Qt.WA_StyledBackground)
+            tile.setToolTip(what)
+            tv = QVBoxLayout(tile)
+            tv.setContentsMargins(10, 6, 10, 6)
+            tv.setSpacing(0)
+            tv.addWidget(label(n.upper(), "tilename"))
+            st = label("STARTING", "tilestate")
+            tv.addWidget(st)
+            self.cards[n], self.tiles[n] = st, tile
+            grid.addWidget(tile, i // 7, i % 7)
+        v.addWidget(mods)
+
         low = QHBoxLayout()
-        a = QVBoxLayout()
-        a.addWidget(label("LIVE FEED", "mlabel"))
+        low.setSpacing(12)
+        a = hud.Panel("live feed")
+        al = QVBoxLayout(a)
+        al.setContentsMargins(10, 22, 10, 10)
         self.feed = hud.Feed()
-        a.addWidget(self.feed, 1)
-        b = QVBoxLayout()
-        b.addWidget(label("RECENT ALERTS", "mlabel"))
+        al.addWidget(self.feed, 1)
+        b = hud.Panel("recent alerts")
+        bl = QVBoxLayout(b)
+        bl.setContentsMargins(10, 22, 10, 10)
         self.recent = table(["Level", "When", "What"], 2)
-        b.addWidget(self.recent, 1)
-        low.addLayout(a, 3)
-        low.addLayout(b, 2)
+        bl.addWidget(self.recent, 1)
+        low.addWidget(a, 3)
+        low.addWidget(b, 2)
         v.addLayout(low, 1)
         self.feed.say("bastion", f"Bastion {core.VERSION} online. Bringing guards up.")
         return w
@@ -496,7 +562,7 @@ class Window(QMainWindow):
         for g in self.ctx.guards:
             ok = g.is_alive() and g.state == "on"
             c = self.cards[g.label]
-            c.setText(f"<span style='color:{GOOD if ok else WARN}'>{'On' if ok else g.state}</span>")
+            c.setText(f"<span style='color:{GOOD if ok else WARN}'>\u25cf {'ONLINE' if ok else g.state.upper()[:22]}</span>")
         u = self.ctx.update
         self.up_box.setVisible(bool(u))
         if u:
@@ -521,12 +587,33 @@ class Window(QMainWindow):
         self.intel_text.setText(f"Block lists: {len(i.ips):,} botnet servers, {len(i._lo):,} criminal networks, {len(i.vuln_drivers):,} abusable drivers, {self.ctx.engine.rules.count:,} malware signatures, {len(i.phish) + len(i.phish_live):,} phishing sites" + (f", {getattr(i, 'bazaar', 0):,} MalwareBazaar fingerprints, {len(i.malsites):,} malware sites" if i.auth_key else "") + f". Updated {when}. Known malware files are recognised by Defender."
                                 + ("  Failed: " + ", ".join(i.errors) if i.errors else ""))
 
+    def tick(self):
+        if not self.isVisible():
+            return
+        self.clock.setText(time.strftime("%H:%M:%S") + "\n" + time.strftime("%a %d %b %Y").upper())
+        cpu = psutil.cpu_percent(None)
+        mem = psutil.virtual_memory().percent
+        n = psutil.net_io_counters()
+        now = (time.monotonic(), n.bytes_recv + n.bytes_sent)
+        rate = 0.0
+        if self._net:
+            rate = max(0.0, (now[1] - self._net[1]) / max(0.2, now[0] - self._net[0]))
+        self._net = now
+        self.g_cpu.push(cpu / 100, f"{cpu:4.0f}%")
+        self.g_mem.push(mem / 100, f"{mem:4.0f}%")
+        self.g_net.push(min(1.0, math.log10(1 + rate / 1024) / 5), f"{rate / 1048576:,.2f} MB/s" if rate >= 1048576 else f"{rate / 1024:,.0f} KB/s")
+
     def hud_refresh(self, colour, head):
         """Reactor, metrics and feed lines: all from real guard state, nothing invented."""
         gs = self.ctx.guards
         up = sum(g.is_alive() and g.state == "on" for g in gs)
         word = {GOOD: "SECURE", WARN: "STANDBY" if head.startswith("Starting") else "CAUTION", BAD: "ALERT"}[colour]
         self.reactor.set_state(colour, "SCANNING" if self.scanning else word, self.scanning)
+        self.chip.setText(f"\u25cf {('SCANNING' if self.scanning else word)}")
+        self.chip.setStyleSheet(f"color: {colour}; border: 1px solid {colour};")
+        now = time.time()
+        self.radar.set_blips([((zlib.crc32((r[3] or "").encode() + r[4].encode()) % 360), 0.12 + 0.85 * min(1.0, (now - r[1]) / 86400), QColor(COLOURS[r[2]]))
+                              for r in self.ctx.log.latest(40, core.LOW) if now - r[1] < 86400])
         hr = time.localtime().tm_hour
         self.greet.setText(("Good morning." if 5 <= hr < 12 else "Good afternoon." if 12 <= hr < 18 else "Good evening.") + f" {up} of {len(gs)} systems online.")
         secs = int(time.time() - self.started)
