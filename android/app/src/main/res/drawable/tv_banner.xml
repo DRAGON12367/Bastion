@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 320x180 TV home-screen banner. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><shape><size android:width="320dp" android:height="180dp" /><gradient android:angle="315" android:startColor="#0D4A63" android:endColor="#04080D" /></shape></item>
+    <item android:drawable="@drawable/ic_launcher_foreground" android:width="180dp" android:height="180dp" android:gravity="center" />
+</layer-list>

@@ -14,8 +14,14 @@
     <!-- To keep the 24/7 check scheduled after the phone restarts. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Works on phones, tablets, Chromebooks and TVs: no touchscreen or phone radio is required. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
     <application
         android:label="Bastion"
+        android:banner="@drawable/tv_banner"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/no_backup"
@@ -28,10 +34,13 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:screenOrientation="unspecified">
+            android:screenOrientation="unspecified"
+            android:resizeableActivity="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <!-- Shows Bastion on the Android TV / Google TV / Fire TV home screen. -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
             <!-- "Share" a link to Bastion to check it. -->
             <intent-filter android:label="Check link with Bastion">

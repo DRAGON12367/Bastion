@@ -55,7 +55,9 @@ public class MainActivity extends Activity {
         scroll.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0xFF0B1C2A, BG, BG}));
         scroll.setFillViewport(true);
         LinearLayout root = column();
-        root.setPadding(dp(18), dp(28), dp(18), dp(28));
+        // Tablets, Chromebooks and TVs: keep a readable column in the middle instead of stretching across the screen.
+        int widthDp = getResources().getConfiguration().screenWidthDp, side = Math.max(18, (widthDp - 680) / 2);
+        root.setPadding(dp(side), dp(28), dp(side), dp(28));
         scroll.addView(root);
 
         LinearLayout top = card();

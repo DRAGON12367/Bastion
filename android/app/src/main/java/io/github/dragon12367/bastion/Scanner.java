@@ -235,7 +235,7 @@ public final class Scanner {
             Judge.Verdict v = Judge.judge(f, badPkgs, badCerts, trusted);
             if (v.level > Judge.NONE) r.apps.add(new AppResult(f, v));
         }
-        r.apps.sort((a, b) -> b.verdict.level != a.verdict.level ? b.verdict.level - a.verdict.level : b.verdict.score - a.verdict.score);
+        java.util.Collections.sort(r.apps, (a, b) -> b.verdict.level != a.verdict.level ? b.verdict.level - a.verdict.level : b.verdict.score - a.verdict.score);
     }
 
     private String installer(String pkg) {

@@ -121,7 +121,7 @@ public class GuardJob extends JobService {
             nm.createNotificationChannel(new NotificationChannel("updates", "Updates", NotificationManager.IMPORTANCE_DEFAULT));
         PendingIntent open = PendingIntent.getActivity(c, id, new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        Notification n = new Notification.Builder(c, "updates")
+        Notification n = builder(c, "updates")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(title)
                 .setContentText(text)
@@ -139,7 +139,7 @@ public class GuardJob extends JobService {
             nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Security alerts", NotificationManager.IMPORTANCE_HIGH));
         PendingIntent open = PendingIntent.getActivity(c, 0, new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        Notification n = new Notification.Builder(c, CHANNEL)
+        Notification n = builder(c, CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle(title)
                 .setContentText(text)
@@ -151,5 +151,11 @@ public class GuardJob extends JobService {
             nm.notify(id, n);
         } catch (SecurityException ignored) {        // notifications not allowed by the user
         }
+    }
+
+    /** Android 8+ needs a channel; Android 6 and 7 do not have channels. */
+    @SuppressWarnings("deprecation")
+    static Notification.Builder builder(Context c, String channel) {
+        return Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(c, channel) : new Notification.Builder(c);
     }
 }

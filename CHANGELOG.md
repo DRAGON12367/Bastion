@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.1 (Android)
+Runs on many more devices.
+
+- **Android 6.0 and 7 phones** are now supported (was Android 8+), for example the Galaxy S7, Pixel 1 and Moto G4.
+- **Android TV, Google TV and Fire TV:** Bastion appears on the TV home screen and works with a remote.
+- **Tablets and Chromebooks:** the screen keeps a readable column on wide displays.
+- The README lists exactly which devices work.
+
 ## v1.4.0 (Windows + Android)
 A live HUD.
 
